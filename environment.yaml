@@ -1,0 +1,15 @@
+name: biohub_rnaseq
+channels:
+ - bioconda
+ - conda-forge
+ - defaults
+dependencies:
+  - snakemake
+  - conda-forge::pigz
+  - bioconda::sra-tools
+  - fastp
+  - bioconda::multiqc
+  - bioconda::samtools
+  - bioconda::star
+  - bioconda::rsem
+  - bioconda::gatk4
