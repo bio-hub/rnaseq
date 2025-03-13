@@ -2,9 +2,12 @@ name: biohub_rnaseq
 channels:
  - bioconda
  - conda-forge
+ - r
  - defaults
 dependencies:
   - snakemake
+  - r::r-base=4.4.0
+  - conda-forge::parallel
   - conda-forge::pigz
   - bioconda::sra-tools
   - fastp
