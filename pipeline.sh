@@ -10,6 +10,7 @@ mkdir -p ./output/clean
 mkdir -p ./output/mapped
 mkdir -p ./output/counts
 mkdir -p ./output/logs
+mkdir -p ./output/rdata
 
 #dowload reference genome and gene annotation
 wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz --output-document ./reference/GRCh38_p14.fna.gz
@@ -27,14 +28,22 @@ gzip -d ./reference/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz
 # --sjdbGTFfile ./reference/GRCh38_p14.gtf \
 # --sjdbOverhang 99
 
-rsem-prepare-reference -p $((ncores - 2)) \
---gtf ./reference/GRCh38_p14.gtf \
---star \
-./reference/GRCh38_p14.fa \
-./reference/GRCh38_p14_RSEM_index/GRCh38_p14
+echo "Building index files for the reference genome..."
+if [ ! -f ./reference/GRCh38_p14_RSEM_index/genomeParameters.txt ]; then
+    rsem-prepare-reference -p $((ncores - 2)) \
+    --gtf ./reference/GRCh38_p14.gtf \
+    --star \
+    ./reference/GRCh38_p14.fa \
+    ./reference/GRCh38_p14_RSEM_index/GRCh38_p14
+    echo "Done!"
+else
+    echo "reference genome index already exists. Skipping to next step."
+fi
 
 #trim adapters
+echo "Trimming adapters and low-quality reads..."
 for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
+  echo $i
   fastp --thread $((ncores - 2)) \
   -i "./samples/"$i"_1.fastq.gz" \
   -I "./samples/"$i"_2.fastq.gz" \
@@ -43,9 +52,12 @@ for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
   --html "./output/logs/"$i".html" \
   --json "./output/logs/"$i".json"
 done
+echo "Done!"
 
 #mapping with the reference
+echo "Mapping with the reference genome..."
 for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
+  echo $i
   ulimit -n 16384
   STAR --genomeDir ./reference/GRCh38_p14_RSEM_index \
   --readFilesIn \
@@ -64,25 +76,32 @@ for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
   --sjdbGTFfile ./reference/GRCh38_p14.gtf \
   --outSAMattrRGline "ID:"$id"\\tSM:"$i"\\tLB:TRUSEQ\\tPL:ILLUMINA"
 done
+echo "Done!"
 
+#counting transcripts
+echo "Quantifiying transcripts..."
 for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
-${RSEM}/rsem-calculate-expression --seed 1858 -p $nucleo --paired-end \
---alignments \
---no-bam-output \
- --append-names \
-$i"_Aligned.toTranscriptome.out.bam" \
-${db}/GRCh38_RSEM_index/GRCh38 \
-$i
+  rsem-calculate-expression \
+  --seed 1858 \
+  -p $((ncores - 2)) \
+  --paired-end \
+  --alignments \
+  --no-bam-output \
+  --append-names \
+  "./output/mapped/"$i"_Aligned.toTranscriptome.out.bam" \
+  ./reference/GRCh38_RSEM_index/GRCh38 \
+  $i
 done
+echo "Done!"
 
 #remove tmp STAR folders
 rm -r ./output/mapped/*__STARgenome
-rm -r ./output/mapped/*__STARtemp
 
 #move files to other folders
-mv *.out* ../logs
-mv *.stat ../counts
+mv ./output/mapped/*.out* ./output/logs
+mv ./output/mapped/*.stat ./output/counts
 
 #calculate DEGs
-Rscript ./DEG.R
-
+echo "calculating DEGs and Reactome analysis..."
+#Rscript ./DEG.R
+echo "Done!"

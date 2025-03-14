@@ -1,9 +1,9 @@
 name: biohub_rnaseq
 channels:
- - bioconda
- - conda-forge
- - r
- - defaults
+  - bioconda
+  - defaults
+  - conda-forge
+  - r
 dependencies:
   - snakemake
   - r-base
