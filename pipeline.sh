@@ -40,7 +40,7 @@ else
     echo "reference genome index already exists. Skipping to next step."
 fi
 
-#trim adapters
+#trimming adapters
 echo "Trimming adapters and low-quality reads..."
 for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
   echo $i
@@ -74,7 +74,16 @@ for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
   --limitGenomeGenerateRAM $((memory_byte - 8000000000)) \
   --limitBAMsortRAM $((memory_byte - 8000000000)) \
   --sjdbGTFfile ./reference/GRCh38_p14.gtf \
-  --outSAMattrRGline "ID:"$id"\\tSM:"$i"\\tLB:TRUSEQ\\tPL:ILLUMINA"
+  --outSAMattrRGline "ID:"$i"\\tSM:"$i"\\tLB:TRUSEQ\\tPL:ILLUMINA"
+
+  #remove tmp STAR folders
+  rm -r ./output/mapped/*__STARgenome
+
+  #move files to other folders
+  mv ./output/mapped/*_ReadsPerGene.out.tab ./output/counts
+  mv ./output/mapped/*_SJ.out.tab ./output/counts
+  mv ./output/mapped/*.out ./output/logs
+
 done
 echo "Done!"
 
@@ -82,24 +91,24 @@ echo "Done!"
 echo "Quantifiying transcripts..."
 for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
   rsem-calculate-expression \
-  --seed 1858 \
+  --seed 1954 \
   -p $((ncores - 2)) \
   --paired-end \
   --alignments \
   --no-bam-output \
   --append-names \
   "./output/mapped/"$i"_Aligned.toTranscriptome.out.bam" \
-  ./reference/GRCh38_RSEM_index/GRCh38 \
-  $i
+  ./reference/GRCh38_p14_RSEM_index/GRCh38_p14 \
+  "./output/counts/"$i
+
+  cp "./output/counts/"$i".stat/"$i".cnt" "./output/logs/"$i".cnt"
 done
 echo "Done!"
 
-#remove tmp STAR folders
-rm -r ./output/mapped/*__STARgenome
-
-#move files to other folders
-mv ./output/mapped/*.out* ./output/logs
-mv ./output/mapped/*.stat ./output/counts
+#generating fastq QC report
+echo "Generating fastq QC report"
+multiqc ./output/logs
+echo "Done!"
 
 #calculate DEGs
 echo "calculating DEGs and Reactome analysis..."

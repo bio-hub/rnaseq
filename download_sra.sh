@@ -1,7 +1,7 @@
 ncores=$(cat /proc/cpuinfo | grep processor | wc -l)
 memory_mega=$(free -m | awk -F" " 'NR>1 {print $2}' | sed -n 1p)
 
-samples=$(cat ./GSE185919.csv | awk -F"," 'NR>1 {print $1}')
+samples=$(cat ./GSE95078.csv | awk -F"," 'NR>1 {print $1}')
 
 for id in ${samples}; do
 

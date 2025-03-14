@@ -1,12 +1,20 @@
+#command args
+args = commandArgs(trailingOnly = TRUE)
+
 #libraries
-base_packages = c("tidyverse", "data.table", "gt", "ggpubr", "BiocManager")
-bioconductor_packages = c("GenomicFeatures", "GenomicAlignments", "DESeq2", "ReactomePA")
+base_packages = c("data.table", "ggpubr", "devtools", "BiocManager")
+#bioconductor_packages = c("GenomicFeatures", "GenomicAlignments", "DESeq2", "ReactomePA")
+
+bioconductor_packages = c("DESeq2", "ReactomePA")
 
 if (!require(base_packages, quietly = TRUE))
-    install.packages(base_packages, ask = FALSE)
+    install.packages(base_packages, 
+    ask= FALSE, 
+    repo = "https://cran-r.c3sl.ufpr.br/")
 
 if (!require(bioconductor_packages, quietly = TRUE))
-    BiocManager::install(bioconductor_packages, ask = FALSE)
+    BiocManager::install(bioconductor_packages, 
+    ask = FALSE)
 
 #load libraries
 library(tidyverse)
