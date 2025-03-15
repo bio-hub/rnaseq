@@ -1,0 +1,22 @@
+# Configuration for RNA-seq pipeline
+
+# Reference genome information
+reference:
+  genome_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz"
+  annotation_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz"
+  ensembl_url: "https://ftp.ensembl.org/pub/release-113/gtf/homo_sapiens/Homo_sapiens.GRCh38.113.gtf.gz"
+  
+# STAR alignment parameters
+star:
+  sjdbOverhang: 99
+  
+# Resource allocation
+resources:
+  # If not specified, the workflow will determine these automatically
+  # threads_max: 16  # Maximum number of threads to use
+  # mem_gb_max: 32   # Maximum memory in GB to use
+  
+# DEG analysis parameters
+deg_analysis:
+  alpha: 0.05
+  lfc_threshold: 1

@@ -1,145 +1,87 @@
-#command args
-args = commandArgs(trailingOnly = TRUE)
-
 #load libraries
 library(tidyverse)
-#library(Rsamtools)
-#library(GenomicFeatures)
-#library(GenomicAlignments)
-#library(BiocParallel)
 library(DESeq2)
-library(ReactomePA)
+# library(ReactomePA)
+# library(biomaRt)
 
 #read counts
-for (i in list.files(path = "./output/counts", pattern = "_ReadsPerGene.out.tab")){
+for (i in list.files(path = "./output/counts", 
+                     pattern = "_ReadsPerGene.out.tab")){
   sample_name = str_replace(i, "_ReadsPerGene.out.tab", "")
-  
+
   assign(paste0(sample_name),
         data.table::fread(paste0("./output/counts/",i), skip = 4) %>%
-          select(gene_name = V1,
-                 !!paste0(sample_name) := V2)  # Using := with !! for dynamic column naming
-        )
+          select(V1,
+                 !!paste0(sample_name) := V2) %>% #Using := with !! for dynamic column naming
+          arrange(V1) %>%
+          column_to_rownames("V1")
+        ) 
 }
 rm(i, sample_name)
 
-raw_counts = eval(parse(text = paste0("bind_rows(", paste0(ls(), collapse = ","), ")")))
+raw_counts = eval(parse(
+  text = paste0("bind_cols(", paste0(ls(), collapse = ","), ")")))
 
-raw_counts = raw_counts %>%
-  mutate(across(where(is.numeric), ))
+#command args
+args = commandArgs(trailingOnly = TRUE)
+args = c("./samples/GSE185919_exp_design.csv", "38")
 
-# #load input file
-# input = read.table("./tmp/input_2R.txt", sep = "\t", header = FALSE, stringsAsFactors = FALSE)
-# input$V1 = gsub(" ", "", input$V1)
-# input$V2 = gsub(" ", "", input$V2)
+#read experiment design
+exp_design = read_csv(args[1]) %>%
+  column_to_rownames("sample") %>%
+  mutate(condition = fct_relevel(condition, 
+                                 c("control", "case")))
 
-# #DESeq2 import functions
-# bamfiles <- Rsamtools::BamFileList(input$V3, yieldSize=1000000)
+#create DESeqDataSet object
+dds = DESeqDataSetFromMatrix(countData = raw_counts,
+                             colData = exp_design,
+                             design = ~ condition)
 
-# #Defining gene models
-# gtffile <- "/home/operator/InterOmics/db/GRCh38_genes.gtf"
-# txdb <- GenomicFeatures::makeTxDbFromGFF(gtffile, format = "gtf", circ_seqs = character())
-# ebg <- GenomicFeatures::exonsBy(txdb, by="gene")
-
-# #Read counting step
-# BiocParallel::register(BiocParallel::MulticoreParam(progressbar = TRUE, workers=56))
-
-# ### Quantification
-# se <- GenomicAlignments::summarizeOverlaps(features=ebg, reads=bamfiles,
-#                         mode="Union",
-#                         singleEnd=FALSE,
-#                         ignore.strand=TRUE,
-#                         fragments=TRUE)
-# save.image("./output/rdata/DEG.RData")
-
-###DEG Starting from SummarizedExperiment
-
-#se$condition1 = exp_design$condition1
-#se$condition2 = exp_design$condition2
-#se$condition3 = exp_design$condition3
-
-#se$group=input$V2
-#dds <- DESeqDataSet(se, design = ~group) # Set group to compare
-
-dds <- estimateSizeFactors(dds)
+#estimate size factors
+dds = estimateSizeFactors(dds)
 
 ####Exploratory analysis and visualization
 nrow(dds)
-dds <- dds[ rowSums(counts(dds)) > 10, ]
+dds = dds[ rowSums(counts(dds)) > 10, ]
 nrow(dds)
 
 ###Differential Expression analysis
-dds <- DESeq(dds)
+dds = DESeq(dds)
 
 #View counts
-#View(dds@assays@data$counts)
+dds_counts = dds@assays@data$counts
 
-### OUTPUT####
-groups = unique(input$V2)
+#DEG analysis
+dds_results = results(dds, alpha = 0.05, 
+                           lfcThreshold =1, 
+                           contrast = c("condition", "case", "control"))
 
-# 1 - Lista dos DEGs
-for (i in 1:length(groups)){
-  for (j in 1:length(groups)){
-    if(i != j){
-      nam  = paste0("DEG.",groups[i],".", groups[j])
-      nam2 = paste0("ls.",nam)
-      assign(nam,
-             eval(parse(text=paste0("results(dds, alpha = 0.05, lfcThreshold =1, contrast = c('group','", groups[i],"','",groups[j],"'))")))
-      )
-      assign(nam2,
-             data.frame(get(nam)@listData, SYMBOL = get(nam)@rownames, stringsAsFactors = FALSE)
-      )
-    }
-  }
-}
+dds_degs = data.frame(dds_results@listData,
+                      row.names = dds_results@rownames)
 
-# 2 -Gene Expression para cada individuo - Normalizada
-tempa = data.frame(dds@assays@data$counts)
-colnames(tempa) = sub("_Aligned.sortedByCoord.out.bam","",names(tempa))
-tempa = data.frame(SYMBOL = rownames(get(nam)),tempa) #Nao remover o obejto nam.
-# Gene SYMBOL to ENTREZID
-library(org.Hs.eg.db)
-tempb = select(x = org.Hs.eg.db,keys = tempa$SYMBOL,columns = c("SYMBOL","ENTREZID"),keytype = "SYMBOL")
-source(file = "../../../../transcriptome/output/functions/fix.geneID.R")
-fix.geneID(df_input = tempb,df_name_output = "tempc")
-
-genes.count = merge(tempc,tempa, by ="SYMBOL", all = TRUE)
-# DEG Final object
-for (i in ls(pattern = "ls.DEG.")){
-  assign(i,
-         merge(tempc,get(i),by ="SYMBOL", all = TRUE))
-}
-rm(tempa,tempb)
-
-for (i in ls(pattern = "ls.DEG.")){
-  nam = sub("ls.DEG.","",i)
-  assign(paste0("up.",nam),
-         get(i)[which(get(i)$log2FoldChange  > 1 & get(i)$padj < 0.05),]
-  )
-  assign(paste0("down.",nam),
-         get(i)[which(get(i)$log2FoldChange < -1 & get(i)$padj < 0.05),]
-  )
-  
-}
-
-DEG = list()
-for (i in ls(pattern = "ls.DEG.")){
-  nam = sub("ls.DEG.","",i)
-  # eval(parse(text = paste0("DEG = list(",nam,"= list(all = ls.DEG.",nam,", up = up.",nam,", down = down.",nam,"))")))
-  eval(parse(text = paste0("DEG$",nam," = list(all = ls.DEG.",nam,", up = up.",nam,", down = down.",nam,",DESeqResults = DEG.",nam,")")))
-  
-}
-rm(list = ls(pattern = "up\\.|down\\.|DEG\\."))
+#get entrez id
 
 
 
-#### Reactome ####
-source(file = "../../../../transcriptome/output/functions/deg.enrichPathway.R")
+# ensembl = biomaRt::useMart("ensembl", 
+#                            dataset = "hsapiens_gene_ensembl")
 
-for (i in names(DEG)){
-  deg.enrichPathway(comparisons = i)
-}
+# attributes = c("hgnc_symbol", 
+#                "entrezgene_id")
 
+# filters = c("hgnc_symbol")
 
-#save rdata
+# values = list(hgnc_symbol = rownames(dds_degs))
+
+# query_entrezid = biomaRt::getBM(attributes = attributes, 
+#                                 filters = filters, 
+#                                 values = values, 
+#                                 mart = ensembl)
+
+#reactome
+reactome_total = enrichPathway(gene=c(dep_downregulated, dep_upregulated),
+                               pvalueCutoff = 0.05, 
+                               readable=TRUE)
+
+#save DESEq2 analsyis
 save.image("./output/rdata/DEG.RData")
-

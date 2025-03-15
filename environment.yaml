@@ -9,6 +9,12 @@ dependencies:
   - bioconda::bioconductor-biocinstaller
   - bioconda::bioconductor-deseq2
   - bioconda::bioconductor-reactomepa 
+  - bioconda::bioconductor-biomart
+  # - bioconda::bioconductor-Rsamtools
+  # - bioconda::bioconductor-txdbmaker
+  # - bioconda::bioconductor-GenomicFeatures
+  # - bioconda::bioconductor-GenomicAlignments
+  # - bioconda::bioconductor-BiocParallel 
   - conda-forge::pigz
   - python=3.11
   - snakemake
