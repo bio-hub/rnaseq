@@ -212,21 +212,21 @@ rule run_multiqc:
         multiqc ./output/logs -o ./output/logs -f 2> {log}
         """
 
-# Run DEG analysis with R
-# rule run_deg_analysis:
-#     input:
-#         counts = expand("output/counts/{sample}_ReadsPerGene.out.tab", sample=SAMPLES),
-#         rsem_counts = expand("output/counts/{sample}.genes.results", sample=SAMPLES)
-#     output:
-#         rdata = "output/rdata/DEG.RData"
-#     params: 
-#        exp_design = config["deg_analysis"]["experiment_design_path"]
-#        alpha = config["deg_analysis"]["alpha"]
-#        lfc_threshold = config["deg_analysis"]["lfc_threshold"]
-#     log:
-#         "output/logs/deg_analysis.log"
-#     threads: lambda wildcards, attempt: min(ncores - 2, 12)
-#     shell:
-#         """
-#         Rscript ./DEG.R {params.exp_design} {threads} {params.alpha} {params.lfc_threshold} > {log} 2>&1
-#         """
+#Run DEG analysis with R
+rule run_deg_analysis:
+    input:
+        counts = expand("output/counts/{sample}_ReadsPerGene.out.tab", sample=SAMPLES),
+        rsem_counts = expand("output/counts/{sample}.genes.results", sample=SAMPLES)
+    output:
+        rdata = "output/rdata/DEG.RData"
+    params: 
+       exp_design = config["deg_analysis"]["experiment_design_path"]
+       alpha = config["deg_analysis"]["alpha"]
+       lfc_threshold = config["deg_analysis"]["lfc_threshold"]
+    log:
+        "output/logs/deg_analysis.log"
+    threads: lambda wildcards, attempt: min(ncores - 2, 12)
+    shell:
+        """
+        Rscript ./DEG.R {params.exp_design} {threads} {params.alpha} {params.lfc_threshold} > {log} 2>&1
+        """
