@@ -18,12 +18,20 @@ if (!require(bioconductor_packages, quietly = TRUE))
 
 #load libraries
 library(tidyverse)
-library(ggpubr)
 #library(Rsamtools)
 #library(GenomicFeatures)
 #library(GenomicAlignments)
 #library(BiocParallel)
 library(DESeq2)
+library(ReactomePA)
+
+#read counts
+for (i in list.files(path = "./output/counts", pattern = "_ReadsPerGene.out.tab")){
+  assign(paste0(str_replace(i, "_ReadsPerGene.out.tab", "")),
+        data.table::fread(paste0("./output/counts/",i),   skip = 4)
+        )
+}
+rm(i)
 
 #load input file
 input = read.table("./tmp/input_2R.txt", sep = "\t", header = FALSE, stringsAsFactors = FALSE)

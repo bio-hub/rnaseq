@@ -6,6 +6,10 @@ channels:
 dependencies:
   - conda-forge::r-base=4.4.2
   - conda-forge::r-tidyverse
+  - bioconda::bioconductor-biocinstaller
+  - bioconda::bioconductor-deseq2
+  - bioconda::bioconductor-enrichplot
+  - bioconda::bioconductor-reactomepa
   - conda-forge::pigz
   - python=3.11
   - snakemake
