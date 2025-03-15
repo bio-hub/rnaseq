@@ -1,21 +1,6 @@
 #command args
 args = commandArgs(trailingOnly = TRUE)
 
-#libraries
-base_packages = c("data.table", "ggpubr", "devtools", "BiocManager")
-#bioconductor_packages = c("GenomicFeatures", "GenomicAlignments", "DESeq2", "ReactomePA")
-
-bioconductor_packages = c("DESeq2", "ReactomePA")
-
-if (!require(base_packages, quietly = TRUE))
-    install.packages(base_packages, 
-    ask= FALSE, 
-    repo = "https://cran-r.c3sl.ufpr.br/")
-
-if (!require(bioconductor_packages, quietly = TRUE))
-    BiocManager::install(bioconductor_packages, 
-    ask = FALSE)
-
 #load libraries
 library(tidyverse)
 #library(Rsamtools)
@@ -27,35 +12,44 @@ library(ReactomePA)
 
 #read counts
 for (i in list.files(path = "./output/counts", pattern = "_ReadsPerGene.out.tab")){
-  assign(paste0(str_replace(i, "_ReadsPerGene.out.tab", "")),
-        data.table::fread(paste0("./output/counts/",i),   skip = 4)
+  sample_name = str_replace(i, "_ReadsPerGene.out.tab", "")
+  
+  assign(paste0(sample_name),
+        data.table::fread(paste0("./output/counts/",i), skip = 4) %>%
+          select(gene_name = V1,
+                 !!paste0(sample_name) := V2)  # Using := with !! for dynamic column naming
         )
 }
-rm(i)
+rm(i, sample_name)
 
-#load input file
-input = read.table("./tmp/input_2R.txt", sep = "\t", header = FALSE, stringsAsFactors = FALSE)
-input$V1 = gsub(" ", "", input$V1)
-input$V2 = gsub(" ", "", input$V2)
+raw_counts = eval(parse(text = paste0("bind_rows(", paste0(ls(), collapse = ","), ")")))
 
-#DESeq2 import functions
-bamfiles <- Rsamtools::BamFileList(input$V3, yieldSize=1000000)
+raw_counts = raw_counts %>%
+  mutate(across(where(is.numeric), ))
 
-#Defining gene models
-gtffile <- "/home/operator/InterOmics/db/GRCh38_genes.gtf"
-txdb <- GenomicFeatures::makeTxDbFromGFF(gtffile, format = "gtf", circ_seqs = character())
-ebg <- GenomicFeatures::exonsBy(txdb, by="gene")
+# #load input file
+# input = read.table("./tmp/input_2R.txt", sep = "\t", header = FALSE, stringsAsFactors = FALSE)
+# input$V1 = gsub(" ", "", input$V1)
+# input$V2 = gsub(" ", "", input$V2)
 
-#Read counting step
-BiocParallel::register(BiocParallel::MulticoreParam(progressbar = TRUE, workers=56))
+# #DESeq2 import functions
+# bamfiles <- Rsamtools::BamFileList(input$V3, yieldSize=1000000)
 
-### Quantification
-se <- GenomicAlignments::summarizeOverlaps(features=ebg, reads=bamfiles,
-                        mode="Union",
-                        singleEnd=FALSE,
-                        ignore.strand=TRUE,
-                        fragments=TRUE)
-save.image("./output/rdata/DEG.RData")
+# #Defining gene models
+# gtffile <- "/home/operator/InterOmics/db/GRCh38_genes.gtf"
+# txdb <- GenomicFeatures::makeTxDbFromGFF(gtffile, format = "gtf", circ_seqs = character())
+# ebg <- GenomicFeatures::exonsBy(txdb, by="gene")
+
+# #Read counting step
+# BiocParallel::register(BiocParallel::MulticoreParam(progressbar = TRUE, workers=56))
+
+# ### Quantification
+# se <- GenomicAlignments::summarizeOverlaps(features=ebg, reads=bamfiles,
+#                         mode="Union",
+#                         singleEnd=FALSE,
+#                         ignore.strand=TRUE,
+#                         fragments=TRUE)
+# save.image("./output/rdata/DEG.RData")
 
 ###DEG Starting from SummarizedExperiment
 
@@ -63,8 +57,9 @@ save.image("./output/rdata/DEG.RData")
 #se$condition2 = exp_design$condition2
 #se$condition3 = exp_design$condition3
 
-se$group=input$V2
-dds <- DESeqDataSet(se, design = ~group) # Set group to compare
+#se$group=input$V2
+#dds <- DESeqDataSet(se, design = ~group) # Set group to compare
+
 dds <- estimateSizeFactors(dds)
 
 ####Exploratory analysis and visualization
