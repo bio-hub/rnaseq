@@ -8,8 +8,8 @@ dependencies:
   - conda-forge::r-tidyverse
   - bioconda::bioconductor-biocinstaller
   - bioconda::bioconductor-deseq2
+  d- bioconda::bioconductor-org.Hs.eg.db
   - bioconda::bioconductor-reactomepa 
-  - bioconda::bioconductor-biomart
   # - bioconda::bioconductor-Rsamtools
   # - bioconda::bioconductor-txdbmaker
   # - bioconda::bioconductor-GenomicFeatures

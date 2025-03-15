@@ -24,7 +24,7 @@ raw_counts = eval(parse(
 
 #command args
 args = commandArgs(trailingOnly = TRUE)
-args = c("./samples/GSE185919_exp_design.csv", "38")
+args = c("./samples/GSE185919_exp_design.csv", "38", "0.05", "1")
 
 #read experiment design
 exp_design = read_csv(args[1]) %>%
@@ -52,36 +52,26 @@ dds = DESeq(dds)
 dds_counts = dds@assays@data$counts
 
 #DEG analysis
-dds_results = results(dds, alpha = 0.05, 
-                           lfcThreshold =1, 
+dds_results = results(dds, alpha = as.numeric(args[3]), 
+                           lfcThreshold = as.numeric(args[4]), 
                            contrast = c("condition", "case", "control"))
 
 dds_degs = data.frame(dds_results@listData,
                       row.names = dds_results@rownames)
 
 #get entrez id
+gene_info = read_delim("./reference/GRCh38_p14_gene_info.tsv")
 
-
-
-# ensembl = biomaRt::useMart("ensembl", 
-#                            dataset = "hsapiens_gene_ensembl")
-
-# attributes = c("hgnc_symbol", 
-#                "entrezgene_id")
-
-# filters = c("hgnc_symbol")
-
-# values = list(hgnc_symbol = rownames(dds_degs))
-
-# query_entrezid = biomaRt::getBM(attributes = attributes, 
-#                                 filters = filters, 
-#                                 values = values, 
-#                                 mart = ensembl)
+dds_degs  = dds_degs %>%
+  rownames_to_column("gene_symbol") %>%
+  left_join(., gene_info, join_by(gene_symbol == gene_symbol))
 
 #reactome
-reactome_total = enrichPathway(gene=c(dep_downregulated, dep_upregulated),
-                               pvalueCutoff = 0.05, 
-                               readable=TRUE)
+reactome_total = ReactomePA::enrichPathway(gene = dds_degs$gene_id,
+                                           pvalueCutoff = as.numeric(args[3]), 
+                                           readable = TRUE)
+
+dds_reactome = data.frame(reactome_total)
 
 #save DESEq2 analsyis
 save.image("./output/rdata/DEG.RData")

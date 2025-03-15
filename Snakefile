@@ -59,27 +59,28 @@ rule create_directories:
 # Download reference genome and gene annotation
 rule download_reference:
     output:
-        genome = "reference/GRCh38_p14.fna",
-        annotation = "reference/GRCh38_p14.gtf"
-        ensembl_gtf = "reference/GRCh38_ensembl_113.gtf"
+        genome = "reference/GRCh38_p14.fa",
+        annotation = "reference/GRCh38_p14.gtf",
+        ncbi_gene_info = "reference/ncbi_gene_info",
+        human_gene_info = "reference/GRCh38_p14_gene_info.tsv"
     log:
         "output/logs/download_reference.log"
     shell:
         """
         wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz \
-        --output-document ./reference/GRCh38_p14.fna.gz
+        --output-document ./reference/GRCh38_p14.fa.gz
 
         wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz \
         --output-document ./reference/GRCh38_p14.gtf.gz
         
-        wget -c "https://ftp.ensembl.org/pub/release-113/gtf/homo_sapiens/Homo_sapiens.GRCh38.113.gtf.gz" \
-        --output-document ./reference/GRCh38_ensembl_113.gtf.gz
+        wget -c "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene_info.gz" \
+        --output-document ./reference/ncbi_gene_info.gz
 
-        gzip -d ./reference/GRCh38_p14.fna.gz
+        gzip -d ./reference/GRCh38_p14.fa.gz
         gzip -d ./reference/GRCh38_p14.gtf.gz
-        gzip -d ./reference/GRCh38_ensembl_113.gtf.gz
+        gzip -d ./reference/ncbi_gene_info.gz
 
-        Rscript ./ETL_ensembl.R > {log} 2>&1
+        Rscript ./ETL_gene_info.R > {log} 2>&1
         """
 
 # Create RSEM index
@@ -218,10 +219,14 @@ rule run_multiqc:
 #         rsem_counts = expand("output/counts/{sample}.genes.results", sample=SAMPLES)
 #     output:
 #         rdata = "output/rdata/DEG.RData"
+#     params: 
+#        exp_design = config["deg_analysis"]["experiment_design_path"]
+#        alpha = config["deg_analysis"]["alpha"]
+#        lfc_threshold = config["deg_analysis"]["lfc_threshold"]
 #     log:
 #         "output/logs/deg_analysis.log"
 #     threads: lambda wildcards, attempt: min(ncores - 2, 12)
 #     shell:
 #         """
-#         Rscript ./DEG.R params.threads > {log} 2>&1
+#         Rscript ./DEG.R {params.exp_design} {threads} {params.alpha} {params.lfc_threshold} > {log} 2>&1
 #         """

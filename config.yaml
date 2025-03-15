@@ -4,12 +4,12 @@
 reference:
   genome_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz"
   annotation_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz"
-  ensembl_url: "https://ftp.ensembl.org/pub/release-113/gtf/homo_sapiens/Homo_sapiens.GRCh38.113.gtf.gz"
+  gene_info_url: "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene_info.gz"
   
 # STAR alignment parameters
 star:
   sjdbOverhang: 99
-  
+
 # Resource allocation
 resources:
   # If not specified, the workflow will determine these automatically
@@ -18,5 +18,6 @@ resources:
   
 # DEG analysis parameters
 deg_analysis:
+  experiment_design_path: "./reference/samples/GSE185919_exp_design.csv"
   alpha: 0.05
   lfc_threshold: 1
