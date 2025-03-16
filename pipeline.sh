@@ -13,11 +13,11 @@ mkdir -p ./output/logs
 mkdir -p ./output/rdata
 
 #dowload reference genome and gene annotation
-wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz --output-document ./reference/GRCh38_p14.fna.gz
+wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz --output-document ./reference/GRCh38_p14.fa.gz
 wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz --output-document ./reference/GRCh38_p14.gtf.gz
 
-gzip -d ./reference/GCF_000001405.40_GRCh38.p14_genomic.fna.gz 
-gzip -d ./reference/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz
+gzip -d ./reference/GRCh38_p14.fa.gz 
+gzip -d ./reference/GRCh38_p14.gtf.gz
 
 #create index
 # STAR --genomeDir ./reference/GRCh38_p14_STAR_index \
