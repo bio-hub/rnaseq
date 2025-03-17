@@ -44,7 +44,7 @@ smallest_group_size = exp_design %>%
   summarise(min_n = min(n)) %>% 
   pull(min_n)
   
-keep =  rowSums(counts(dds)) > 10 >= smallest_group_size
+keep = rowSums(counts(dds) >= 10) >=  smallest_group_size
 dds = dds[keep, ]
 
 #export raw_counts
