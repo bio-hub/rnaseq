@@ -42,13 +42,11 @@ fi
 
 #trimming adapters
 echo "Trimming adapters and low-quality reads..."
-for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
+for i in $(ls ./samples | grep .fastq.gz | sed 's/.fastq.gz*//' | uniq); do
   echo $i
   fastp --thread $((ncores - 2)) \
-  -i "./samples/"$i"_1.fastq.gz" \
-  -I "./samples/"$i"_2.fastq.gz" \
-  -o "./output/clean/"$i"_clean_1.fastq.gz" \
-  -O "./output/clean/"$i"_clean_2.fastq.gz" \
+  -i "./samples/"$i".fastq.gz" \
+  -o "./output/clean/"$i"_clean.fastq.gz" \
   --html "./output/logs/"$i".html" \
   --json "./output/logs/"$i".json"
 done
@@ -56,13 +54,12 @@ echo "Done!"
 
 #mapping with the reference
 echo "Mapping with the reference genome..."
-for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
+for i in $(ls ./samples | grep .fastq.gz | sed 's/.fastq.gz*//' | uniq); do
   echo $i
   ulimit -n 16384
   STAR --genomeDir ./reference/GRCh38_p14_RSEM_index \
   --readFilesIn \
-  "./output/clean/"$i"_clean_1.fastq.gz" \
-  "./output/clean/"$i"_clean_2.fastq.gz" \
+  "./output/clean/"$i"_clean.fastq.gz" \
   --readFilesCommand zcat \
   --sjdbScore 2 \
   --outSAMattributes NH HI AS nM XS \
@@ -89,11 +86,10 @@ echo "Done!"
 
 #counting transcripts
 echo "Quantifiying transcripts..."
-for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
+for i in $(ls ./samples | grep .fastq.gz | sed 's/.fastq.gz*//' | uniq); do
   rsem-calculate-expression \
   --seed 1954 \
   -p $((ncores - 2)) \
-  --paired-end \
   --alignments \
   --no-bam-output \
   --append-names \
