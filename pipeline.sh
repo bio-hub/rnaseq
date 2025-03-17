@@ -122,7 +122,7 @@ echo "Done!"
 
 #calculate DEGs
 echo "calculating DEGs and Reactome analysis..."
-Rscript ./DEG.R $exp_design_path
+Rscript ./DEG.R $exp_design_path 0.05 1
 echo "Done!"
 
 #moving output to samples file
