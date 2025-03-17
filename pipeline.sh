@@ -1,10 +1,21 @@
+#!/bin/bash
+
+#to run this script execute the command line:
+#bash your_script.sh /path/to/fastq.gz/files/folder /path/to/experiment_design.csv
+
+# Get variables from arguments
+samples_path=$1
+exp_design_path=$2
+
+echo "Samples folder: $samples_path"
+echo "Experiment design file: $exp_design_path"
+
 #computational resources
 ncores=$(cat /proc/cpuinfo | grep processor | wc -l)
 memory_mega=$(free -m | awk -F" " 'NR>1 {print $2}' | sed -n 1p)
 memory_byte=$(free -b | awk -F" " 'NR>1 {print $2}' | sed -n 1p)
 
 #creating directories
-mkdir sratookit_cache
 mkdir -p ./reference/GRCh38_p14_RSEM_index/    
 mkdir -p ./output/clean
 mkdir -p ./output/mapped
@@ -40,11 +51,11 @@ echo "Done!"
 
 #trimming adapters
 echo "Trimming adapters and low-quality reads..."
-for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
+for i in $(ls $samples_path | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
   echo $i
   fastp --thread $((ncores - 2)) \
-  -i "./samples/"$i"_1.fastq.gz" \
-  -I "./samples/"$i"_2.fastq.gz" \
+  -i "$samples_path/"$i"_1.fastq.gz" \
+  -I "$samples_path/"$i"_2.fastq.gz" \
   -o "./output/clean/"$i"_clean_1.fastq.gz" \
   -O "./output/clean/"$i"_clean_2.fastq.gz" \
   --html "./output/logs/"$i".html" \
@@ -54,7 +65,7 @@ echo "Done!"
 
 #mapping with the reference
 echo "Mapping with the reference genome..."
-for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
+for i in $(ls $samples_path  | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
   echo $i
   ulimit -n 16384
   STAR --genomeDir ./reference/GRCh38_p14_RSEM_index \
@@ -87,7 +98,7 @@ echo "Done!"
 
 #counting transcripts
 echo "Quantifiying transcripts..."
-for i in $(ls ./samples | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
+for i in $(ls $samples_path | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
   rsem-calculate-expression \
   --seed 1954 \
   -p $((ncores - 2)) \
@@ -111,5 +122,10 @@ echo "Done!"
 
 #calculate DEGs
 echo "calculating DEGs and Reactome analysis..."
-#Rscript ./DEG.R
+Rscript ./DEG.R $exp_design_path
+echo "Done!"
+
+#moving output to samples file
+echo "moving output to samples file"
+mv ./output/ $samples_path
 echo "Done!"
