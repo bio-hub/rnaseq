@@ -24,7 +24,6 @@ raw_counts = eval(parse(
 
 #command args
 args = commandArgs(trailingOnly = TRUE)
-args = c("./samples/GSE185919_exp_design.csv", "38", "0.05", "1")
 
 #read experiment design
 exp_design = read_csv(args[1]) %>%
@@ -40,20 +39,23 @@ dds = DESeqDataSetFromMatrix(countData = raw_counts,
 #estimate size factors
 dds = estimateSizeFactors(dds)
 
-####Exploratory analysis and visualization
-nrow(dds)
-dds = dds[ rowSums(counts(dds)) > 10, ]
-nrow(dds)
+#remove transcript with low counts
+smallest_group_size = exp_design %>% 
+  group_by(condition) %>% 
+  summarise(n = n()) %>% 
+  min(n) %>% 
+  pull(n)
+keep =  rowSums(counts(dds)) > 10 >= smallest_group_size
+dds = dds[keep, ]
 
-###Differential Expression analysis
-dds = DESeq(dds)
-
-#View counts
+#export raw_counts
 dds_counts = dds@assays@data$counts
 
-#DEG analysis
-dds_results = results(dds, alpha = as.numeric(args[3]), 
-                           lfcThreshold = as.numeric(args[4]), 
+#differential expression analysis
+dds = DESeq(dds)
+
+dds_results = results(dds, alpha = as.numeric(args[2]), 
+                           lfcThreshold = as.numeric(args[3]), 
                            contrast = c("condition", "case", "control"))
 
 dds_degs = data.frame(dds_results@listData,
@@ -68,7 +70,7 @@ dds_degs  = dds_degs %>%
 
 #reactome
 reactome_total = ReactomePA::enrichPathway(gene = dds_degs$gene_id,
-                                           pvalueCutoff = as.numeric(args[3]), 
+                                           pvalueCutoff = as.numeric(args[2]), 
                                            readable = TRUE)
 
 dds_reactome = data.frame(reactome_total)

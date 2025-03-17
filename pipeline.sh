@@ -4,7 +4,7 @@ memory_mega=$(free -m | awk -F" " 'NR>1 {print $2}' | sed -n 1p)
 memory_byte=$(free -b | awk -F" " 'NR>1 {print $2}' | sed -n 1p)
 
 #creating directories
-mkdir reference
+mkdir sratookit_cache
 mkdir -p ./reference/GRCh38_p14_RSEM_index/    
 mkdir -p ./output/clean
 mkdir -p ./output/mapped
@@ -15,19 +15,12 @@ mkdir -p ./output/rdata
 #dowload reference genome and gene annotation
 wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz --output-document ./reference/GRCh38_p14.fa.gz
 wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz --output-document ./reference/GRCh38_p14.gtf.gz
+wget -c "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene_info.gz" --output-document ./reference/ncbi_gene_info.gz
 
 gzip -d ./reference/GRCh38_p14.fa.gz 
 gzip -d ./reference/GRCh38_p14.gtf.gz
 
 #create index
-# STAR --genomeDir ./reference/GRCh38_p14_STAR_index \
-# --runMode genomeGenerate \
-# --runThreadN $((ncores - 4)) \
-# --limitGenomeGenerateRAM $((memory_byte - 8000000000)) \
-# --genomeFastaFiles ./reference/GRCh38_p14.fa \
-# --sjdbGTFfile ./reference/GRCh38_p14.gtf \
-# --sjdbOverhang 99
-
 echo "Building index files for the reference genome..."
 if [ ! -f ./reference/GRCh38_p14_RSEM_index/genomeParameters.txt ]; then
     rsem-prepare-reference -p $((ncores - 2)) \
@@ -39,6 +32,11 @@ if [ ! -f ./reference/GRCh38_p14_RSEM_index/genomeParameters.txt ]; then
 else
     echo "reference genome index already exists. Skipping to next step."
 fi
+
+#create gene_info file
+echo "creating gene_info file..."
+Rscript ./ETL_gene_info.R
+echo "Done!"
 
 #trimming adapters
 echo "Trimming adapters and low-quality reads..."

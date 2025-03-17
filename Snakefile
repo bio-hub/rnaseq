@@ -38,6 +38,7 @@ rule all:
 # Create directories
 rule create_directories:
     output:
+        sratookit_cache_dir = directory("sratookit_cache"),
         reference_dir = directory("reference"),
         rsem_index_dir = directory("reference/GRCh38_p14_RSEM_index"),
         clean_dir = directory("output/clean"),
@@ -47,6 +48,7 @@ rule create_directories:
         rdata_dir = directory("output/rdata")
     shell:
         """
+        mkdir -p {output.sratookit_cache_dir}
         mkdir -p {output.reference_dir}
         mkdir -p {output.rsem_index_dir}
         mkdir -p {output.clean_dir}
