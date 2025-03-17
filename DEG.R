@@ -1,8 +1,6 @@
 #load libraries
 library(tidyverse)
 library(DESeq2)
-# library(ReactomePA)
-# library(biomaRt)
 
 #read counts
 for (i in list.files(path = "./output/counts", 
@@ -43,8 +41,9 @@ dds = estimateSizeFactors(dds)
 smallest_group_size = exp_design %>% 
   group_by(condition) %>% 
   summarise(n = n()) %>% 
-  min(n) %>% 
-  pull(n)
+  summarise(min_n = min(n)) %>% 
+  pull(min_n)
+  
 keep =  rowSums(counts(dds)) > 10 >= smallest_group_size
 dds = dds[keep, ]
 
