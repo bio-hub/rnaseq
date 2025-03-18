@@ -67,8 +67,12 @@ dds_degs  = dds_degs %>%
   rownames_to_column("gene_symbol") %>%
   left_join(., gene_info, join_by(gene_symbol == gene_symbol))
 
-#reactome
-reactome_total = ReactomePA::enrichPathway(gene = dds_degs$gene_id,
+#reactome with significant DEGs
+dds_signif = dds_degs %>%
+  filter(padj < as.numeric(args[2])) %>%
+  filter(abs(log2FoldChange) > as.numeric(args[3]))
+
+reactome_total = ReactomePA::enrichPathway(gene = dds_signif$gene_id,
                                            pvalueCutoff = as.numeric(args[2]), 
                                            readable = TRUE)
 
