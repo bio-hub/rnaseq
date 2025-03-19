@@ -100,6 +100,11 @@ for i in $(ls $samples_path  | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq)
 done
 echo "Done!"
 
+#calculate DEGs
+echo "calculating DEGs and Reactome analysis..."
+Rscript ./DEG.R $exp_design_path 0.05 1
+echo "Done!"
+
 #counting transcripts
 echo "Quantifiying transcripts..."
 for i in $(ls $samples_path | grep _1.fastq.gz | sed 's/_1.fastq.gz*//' | uniq); do
@@ -122,11 +127,6 @@ echo "Done!"
 echo "Generating fastq QC report"
 multiqc ./output/logs
 mv multiqc_data multiqc_report.html ./output/logs
-echo "Done!"
-
-#calculate DEGs
-echo "calculating DEGs and Reactome analysis..."
-Rscript ./DEG.R $exp_design_path 0.05 1
 echo "Done!"
 
 #moving output to samples file
