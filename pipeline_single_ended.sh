@@ -7,6 +7,9 @@
 samples_path=$1
 exp_design_path=$2
 
+samples_path=$(echo "$samples_path" | sed 's:/*$::')
+echo "$samples_path"
+
 echo "Samples folder: $samples_path"
 echo "Experiment design file: $exp_design_path"
 
@@ -23,17 +26,24 @@ mkdir -p ./output/counts
 mkdir -p ./output/logs
 mkdir -p ./output/rdata
 
-#dowload reference genome and gene annotation
-wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz --output-document ./reference/GRCh38_p14.fa.gz
-wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz --output-document ./reference/GRCh38_p14.gtf.gz
-wget -c "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene_info.gz" --output-document ./reference/ncbi_gene_info.gz
-
-gzip -d ./reference/GRCh38_p14.fa.gz 
-gzip -d ./reference/GRCh38_p14.gtf.gz
 
 #create index
 echo "Building index files for the reference genome..."
 if [ ! -f ./reference/GRCh38_p14_RSEM_index/genomeParameters.txt ]; then
+
+    #dowload reference genome and gene annotation
+    wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz --output-document ./reference/GRCh38_p14.fa.gz
+    wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz --output-document ./reference/GRCh38_p14.gtf.gz
+    wget -c "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene_info.gz" --output-document ./reference/ncbi_gene_info.gz
+
+    gzip -d ./reference/GRCh38_p14.fa.gz 
+    gzip -d ./reference/GRCh38_p14.gtf.gz
+
+    #create gene_info file
+    echo "creating gene_info file..."
+    Rscript ./ETL_gene_info.R
+    echo "Done!"
+
     rsem-prepare-reference -p $((ncores - 2)) \
     --gtf ./reference/GRCh38_p14.gtf \
     --star \
@@ -43,11 +53,6 @@ if [ ! -f ./reference/GRCh38_p14_RSEM_index/genomeParameters.txt ]; then
 else
     echo "reference genome index already exists. Skipping to next step."
 fi
-
-#create gene_info file
-echo "creating gene_info file..."
-Rscript ./ETL_gene_info.R
-echo "Done!"
 
 #trimming adapters
 echo "Trimming adapters and low-quality reads..."

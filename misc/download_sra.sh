@@ -6,7 +6,7 @@ memory_mega=$(free -m | awk -F" " 'NR>1 {print $2}' | sed -n 1p)
 
 cd samples
 
-samples=$(cat ./GSE185919.csv | awk -F"," 'NR>1 {print $1}')
+samples=$(cat ./GSE205867.csv | awk -F"," 'NR>1 {print $1}')
 
 for id in ${samples}; do
 
