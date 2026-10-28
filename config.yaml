@@ -15,8 +15,12 @@ reference:
 star:
   # Usado no build do indice E repassado ao STAR no mapeamento: os dois
   # precisam bater, senao o STAR aborta. Ideal = comprimento da read - 1.
-  # 100 e o default do RSEM/STAR e o valor do indice que pipeline.sh produz.
-  sjdbOverhang: 100
+  # 149 atende reads de 150 bp, que e a maioria dos projetos aqui.
+  # Para projetos de 100 bp, construa um segundo indice com 99: o valor entra
+  # no nome do diretorio e da sentinela, entao os dois coexistem.
+  #   1) config.local.yaml com star.sjdbOverhang: 99
+  #   2) bash scripts/build_reference.sh
+  sjdbOverhang: 149
   limitBAMsortRAM_gb: 30
 
 # Threads e memoria por rule. Sem auto-deteccao: o valor nao pode depender
