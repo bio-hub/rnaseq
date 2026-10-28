@@ -55,10 +55,13 @@ fi
 echo "Lock obtido em ${TARGET}/.build.lock"
 echo "Construindo referencia em ${TARGET}"
 
+# Ordem importa: --configfile e --resources aceitam varios valores (nargs='+')
+# e engoliriam o alvo `reference_all` se viessem logo antes dele. --cores
+# consome exatamente um valor, entao serve de barreira para os dois.
 snakemake -s reference.smk \
     --configfile "${CONFIGS[@]}" \
-    --cores "${SNAKEMAKE_CORES:-20}" \
     --resources mem_mb="${SNAKEMAKE_MEM_MB:-64000}" \
+    --cores "${SNAKEMAKE_CORES:-20}" \
     reference_all "$@"
 
 echo "Pronto. Sentinela e MANIFEST:"
