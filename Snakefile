@@ -24,8 +24,10 @@ if not config["reference"].get("skip_check", False) and not os.path.exists(REFP[
         f"Referencia ausente ou incompleta: nao encontrei {REFP['done']}\n"
         f"  dir           = {REF_ROOT}\n"
         f"  genome_id     = {GENOME}\n"
-        f"  sjdbOverhang  = {OVH}\n"
+        f"  overhang      = {OVH_ORIGEM}\n"
         "Construa uma vez com:  bash scripts/build_reference.sh\n"
+        "Se as reads deste projeto tem outro comprimento, ajuste star.read_length\n"
+        "em config.local.yaml e construa o indice correspondente.\n"
         "Para planejar sem a referencia montada: --config reference='{skip_check: true}'"
     )
 

@@ -36,9 +36,9 @@ Isso baixa genoma, GTF e o `gene_info` do NCBI e constroi o indice STAR/RSEM em:
 ```
 /mnt/reference/rnaseq/GRCh38_p14/
 ├── fasta/        gtf/        gene_info/
-├── rsem_star_sjdb100/        # o sjdbOverhang entra no nome
+├── rsem_star_sjdb149/        # o overhang derivado entra no nome
 ├── logs/         MANIFEST.txt
-└── .done_sjdb100             # sentinela: so existe se o build terminou
+└── .done_sjdb149             # sentinela: so existe se o build terminou
 ```
 
 Reserve ~40 GB de disco e algumas horas. O script segura um `flock` exclusivo: se
@@ -78,7 +78,7 @@ Tudo em `config.yaml`. Os campos que mais importam:
 | `reference.dir` | raiz das referencias compartilhadas |
 | `reference.genome_id` | subdiretorio do build; um por genoma |
 | `reference.tax_id` | especie filtrada no `gene_info` (9606 = humano) |
-| `star.sjdbOverhang` | ideal = comprimento da read - 1. **Precisa ser o mesmo no build e no mapeamento** |
+| `star.read_length` | comprimento das reads em bp. O workflow deriva `sjdbOverhang = read_length - 1` |
 | `threads.*` / `mem_mb.*` | recursos por rule |
 | `deg_analysis.*` | design experimental, alpha e limiar de log2FC |
 
@@ -94,9 +94,34 @@ reference:
 snakemake --configfile config.yaml config.local.yaml --workflow-profile profiles/local
 ```
 
-O `sjdbOverhang` entra no nome da sentinela (`.done_sjdb100`). Se voce mudar o valor no
-config sem reconstruir o indice, o workflow falha no parse com mensagem explicita, em
-vez de deixar o STAR abortar no meio do mapeamento.
+### Comprimento das reads
+
+Informe `star.read_length` em bp; o workflow deriva o `sjdbOverhang` que o STAR espera
+(`read_length - 1`) e o usa tanto no build do indice quanto no mapeamento, que precisam
+bater. O valor entra no nome do indice e da sentinela, entao projetos de comprimentos
+diferentes convivem no mesmo volume:
+
+| `read_length` | indice | sentinela |
+|---|---|---|
+| 150 | `rsem_star_sjdb149/` | `.done_sjdb149` |
+| 100 | `rsem_star_sjdb99/` | `.done_sjdb99` |
+
+Para um projeto de 100 bp, **nao edite o `config.yaml` versionado**. Crie um
+`config.local.yaml` e construa o segundo indice uma vez:
+
+```bash
+printf 'star:\n  read_length: 100\n' > config.local.yaml
+bash scripts/build_reference.sh        # reaproveita FASTA e GTF ja baixados
+snakemake --workflow-profile profiles/local
+```
+
+O Snakemake **nao detecta** o comprimento das reads a partir dos FASTQ: ele confia no
+config e exige que o indice correspondente exista. Se nao existir, falha no parse com
+mensagem explicita, em vez de deixar o STAR abortar no meio do mapeamento.
+
+Ha ainda `star.sjdbOverhang` como override opcional, com precedencia sobre
+`read_length`. Serve para reads de comprimento misto (use o maior - 1) ou para
+reaproveitar um indice construido com outro valor.
 
 ## Estrutura
 
@@ -152,7 +177,7 @@ O `dir_temp` default aponta para `/mnt/scratch-shared`, nao para `/tmp`: neste c
 ## Problemas comuns
 
 - **"Referencia ausente ou incompleta"** - falta a sentinela. Rode `scripts/build_reference.sh`,
-  ou confira se `reference.dir` / `genome_id` / `star.sjdbOverhang` batem com o que existe em disco.
+  ou confira se `reference.dir` / `genome_id` / `star.read_length` batem com o que existe em disco.
 - **"Outro build em andamento"** - o `flock` esta pego. Confirme que nao ha outro build rodando
   antes de remover `.build.lock`.
 - **Permission denied ao escrever na referencia** - e proposital. Veja a nota de rebuild acima.
