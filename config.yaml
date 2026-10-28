@@ -1,23 +1,48 @@
 # Configuration for RNA-seq pipeline
 
-# Reference genome information
 reference:
+  # Raiz das referencias compartilhadas. Para rodar em outra maquina/caminho,
+  # sobrescreva com --configfile config.local.yaml ou --config reference='{dir: ...}'
+  dir: "/mnt/reference/rnaseq"
+  genome_id: "GRCh38_p14"   # subdiretorio de dir; um por build de genoma
+  tax_id: 9606              # filtro de especie no ETL do gene_info
+  # true apenas para dry-run em maquina sem a referencia montada
+  skip_check: false
   genome_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz"
   annotation_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz"
   gene_info_url: "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene_info.gz"
-  
-# STAR alignment parameters
-star:
-  sjdbOverhang: 99
 
-# Resource allocation
-resources:
-  # If not specified, the workflow will determine these automatically
-  # threads_max: 16  # Maximum number of threads to use
-  # mem_gb_max: 32   # Maximum memory in GB to use
-  
-# DEG analysis parameters
+star:
+  # Usado no build do indice E repassado ao STAR no mapeamento: os dois
+  # precisam bater, senao o STAR aborta. Ideal = comprimento da read - 1.
+  # 100 e o default do RSEM/STAR e o valor do indice que pipeline.sh produz.
+  sjdbOverhang: 100
+  limitBAMsortRAM_gb: 30
+
+# Threads e memoria por rule. Sem auto-deteccao: o valor nao pode depender
+# da maquina que faz o parse do Snakefile (ela nao e a que executa o job).
+threads:
+  build_index: 20
+  trim: 8
+  map: 16
+  quantify: 12
+  deg: 4
+mem_mb:
+  build_index: 64000
+  trim: 8000
+  map: 70000      # genoma STAR ~30 GB + sort 30 GB + folga
+  quantify: 16000
+  deg: 32000
+runtime_min:      # usado apenas pelo executor slurm
+  build_index: 480
+  map: 240
+  trim: 120
+  quantify: 120
+  deg: 120
+
 deg_analysis:
-  experiment_design_path: "./reference/samples/GSE185919_exp_design.csv"
+  enabled: true
+  # Dado do PROJETO (nao e referencia compartilhada), relativo ao workdir
+  experiment_design_path: "metadata/exp_design.csv"
   alpha: 0.05
   lfc_threshold: 1
