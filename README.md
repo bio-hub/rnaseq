@@ -1,78 +1,159 @@
 # RNA-seq Analysis Workflow
 
-This Snakemake workflow automates the RNA-seq analysis pipeline outlined in the `pipeline.sh` script. It includes all steps from reference genome preparation to differential expression analysis.
+Workflow Snakemake para RNA-seq paired-end: trimagem, alinhamento, quantificacao,
+QC e analise de expressao diferencial.
 
-## Features
+A **referencia e um insumo externo**, compartilhado e somente-leitura. Ela vive fora
+do diretorio de trabalho, em `config["reference"]["dir"]` (default `/mnt/reference/rnaseq`),
+e e construida **uma unica vez** por um workflow separado. Nenhuma execucao de analise
+baixa ou reconstroi a referencia.
 
-- Automatic resource allocation based on system capabilities
-- Modular design with separate rules for each step of the analysis
-- Parallel execution of tasks where possible
-- Reproducible analysis with clearly defined dependencies
+## Requisitos
 
-## Requirements
+- Ambiente conda de `environment.yaml`
+- FASTQ paired-end em `samples/`, nomeados `{sample}_1.fastq.gz` e `{sample}_2.fastq.gz`
+- A referencia ja construida (ver abaixo)
 
-- Conda environment as specified in `environment.yaml`
-- Input FASTQ files in the `samples/` directory with naming format: `{sample}_1.fastq.gz` and `{sample}_2.fastq.gz`
+## Instalacao
 
-## Directory Structure
+```bash
+conda env create -f environment.yaml
+conda activate biohub_rnaseq
+```
+
+## Passo 1 - construir a referencia (uma vez por genoma)
+
+```bash
+# o diretorio raiz precisa existir e ser gravavel
+sudo mkdir -p /mnt/reference/rnaseq
+sudo chown "$USER":"$USER" /mnt/reference/rnaseq
+
+bash scripts/build_reference.sh
+```
+
+Isso baixa genoma, GTF e o `gene_info` do NCBI e constroi o indice STAR/RSEM em:
+
+```
+/mnt/reference/rnaseq/GRCh38_p14/
+├── fasta/        gtf/        gene_info/
+├── rsem_star_sjdb100/        # o sjdbOverhang entra no nome
+├── logs/         MANIFEST.txt
+└── .done_sjdb100             # sentinela: so existe se o build terminou
+```
+
+Reserve ~40 GB de disco e algumas horas. O script segura um `flock` exclusivo: se
+voce disparar dois builds ao mesmo tempo, o segundo aborta em vez de corromper o
+indice. Ao terminar, os arquivos ficam somente-leitura. Para reconstruir de proposito:
+
+```bash
+chmod -R u+w /mnt/reference/rnaseq/GRCh38_p14
+```
+
+## Passo 2 - rodar a analise
+
+```bash
+conda activate biohub_rnaseq
+snakemake --workflow-profile profiles/local
+```
+
+O profile local ja define `cores` e `resources.mem_mb`. O `mem_mb` e o que impede o
+Snakemake de agendar jobs pesados demais em paralelo - sem ele, varios `map_reads`
+de ~70 GB sao disparados juntos. Ajuste `profiles/local/config.yaml` para a maquina.
+
+Para planejar sem executar:
+
+```bash
+snakemake --workflow-profile profiles/local -n
+```
+
+Opcionalmente ha um perfil SLURM em `profiles/slurm/` (particao `bigmem`, que e o
+unico no que enxerga `/mnt/reference` enquanto nao houver NFS). Nao e necessario.
+
+## Configuracao
+
+Tudo em `config.yaml`. Os campos que mais importam:
+
+| Campo | Para que serve |
+|---|---|
+| `reference.dir` | raiz das referencias compartilhadas |
+| `reference.genome_id` | subdiretorio do build; um por genoma |
+| `reference.tax_id` | especie filtrada no `gene_info` (9606 = humano) |
+| `star.sjdbOverhang` | ideal = comprimento da read - 1. **Precisa ser o mesmo no build e no mapeamento** |
+| `threads.*` / `mem_mb.*` | recursos por rule |
+| `deg_analysis.*` | design experimental, alpha e limiar de log2FC |
+
+Para rodar em outra maquina ou caminho, nao edite o `config.yaml` versionado - crie um
+`config.local.yaml` (ja no `.gitignore`) com apenas o que muda:
+
+```yaml
+reference:
+  dir: "/caminho/alternativo"
+```
+
+```bash
+snakemake --configfile config.yaml config.local.yaml --workflow-profile profiles/local
+```
+
+O `sjdbOverhang` entra no nome da sentinela (`.done_sjdb100`). Se voce mudar o valor no
+config sem reconstruir o indice, o workflow falha no parse com mensagem explicita, em
+vez de deixar o STAR abortar no meio do mapeamento.
+
+## Estrutura
 
 ```
 .
-├── config.yaml           # Configuration parameters
-├── environment.yaml      # Conda environment specification
-├── DEG.R                 # R script for differential expression analysis
-├── Snakefile             # The workflow definition
-├── samples/              # Directory containing raw FASTQ files
-│   ├── sample1_1.fastq.gz
-│   ├── sample1_2.fastq.gz
-│   └── ...
-└── output/               # Output directory (created by the workflow)
-    ├── clean/            # Trimmed FASTQ files
-    ├── mapped/           # Aligned BAM files
-    ├── counts/           # Gene and transcript counts
-    ├── logs/             # Log files and QC reports
-    └── rdata/            # R data files with DEG results
+├── Snakefile                  # analise (nao constroi referencia)
+├── reference.smk              # construcao da referencia, rodado 1x
+├── common.smk                 # caminhos derivados de config.reference
+├── config.yaml
+├── scripts/build_reference.sh # wrapper com flock
+├── profiles/local/            # execucao local (padrao)
+├── profiles/slurm/            # opcional
+├── metadata/                  # exp_design.csv (dado do projeto)
+├── DEG.R  ETL_gene_info.R
+├── misc/                      # download do SRA, correcao de read group
+├── samples/                   # FASTQ de entrada
+└── output/
+    ├── clean/ mapped/ counts/ logs/ rdata/
 ```
 
-## Usage
+## Etapas
 
-1. Place your paired-end FASTQ files in the `samples/` directory.
+1. **trim_reads** - fastp remove adaptadores e bases de baixa qualidade
+2. **map_reads** - STAR alinha ao genoma e ao transcriptoma, com read group
+3. **quantify_transcripts** - RSEM quantifica por gene e transcrito
+4. **run_multiqc** - consolida QC de fastp, STAR e RSEM
+5. **run_deg_analysis** - DESeq2 + ReactomePA (desligue com `deg_analysis.enabled: false`)
 
-2. If needed, adjust parameters in the `config.yaml` file.
+## Design experimental
 
-3. Run the workflow:
+`metadata/exp_design.csv`, no formato de `metadata/exp_design.example.csv`:
 
-   ```bash
-   snakemake --use-conda -j <cores>
-   ```
+```csv
+sample,condition
+SRR00000001,control
+SRR00000003,case
+```
 
-   where `<cores>` is the number of CPU cores to use.
+Os valores de `condition` precisam ser `control` e `case` - o contraste esta fixo no
+`DEG.R`. Cada grupo precisa de pelo menos 2 amostras.
 
-4. To generate a workflow visualization:
+## Scripts auxiliares
 
-   ```bash
-   snakemake --dag | dot -Tpng > dag.png
-   ```
+```bash
+bash misc/download_sra.sh lista.csv [dir_saida] [dir_temp]
+bash misc/download_sra_single_ended.sh lista.csv [dir_saida] [dir_temp]
+bash misc/fix_rg_flag.sh [dir_samples] [dir_mapped]
+```
 
-## Workflow Steps
+O `dir_temp` default aponta para `/mnt/scratch-shared`, nao para `/tmp`: neste cluster
+`/tmp` e tmpfs em RAM e o `fasterq-dump` estoura a memoria la.
 
-1. **Create directories**: Sets up the necessary directory structure
-2. **Download reference**: Downloads and prepares the human reference genome and annotation
-3. **Build RSEM index**: Creates an index for RSEM/STAR alignment
-4. **Trim reads**: Removes adapters and low-quality sequences using fastp
-5. **Map reads**: Aligns reads to the reference genome using STAR
-6. **Quantify transcripts**: Counts transcript expression using RSEM
-7. **Run MultiQC**: Generates quality control reports
-8. **Run DEG analysis**: Performs differential expression analysis using DESeq2 and ReactomePA
+## Problemas comuns
 
-## Modifying the Workflow
-
-- To add new steps or modify existing ones, edit the `Snakefile`
-- To change parameters for tools, edit the `config.yaml` file
-- To add new dependencies, update the `environment.yaml` file
-
-## Troubleshooting
-
-- Check the log files in `output/logs/` for errors
-- If you encounter resource issues, adjust the `resources` section in `config.yaml`
-- For conda environment issues, try recreating the environment: `conda env create -f environment.yaml --force`
+- **"Referencia ausente ou incompleta"** - falta a sentinela. Rode `scripts/build_reference.sh`,
+  ou confira se `reference.dir` / `genome_id` / `star.sjdbOverhang` batem com o que existe em disco.
+- **"Outro build em andamento"** - o `flock` esta pego. Confirme que nao ha outro build rodando
+  antes de remover `.build.lock`.
+- **Permission denied ao escrever na referencia** - e proposital. Veja a nota de rebuild acima.
+- Logs de cada etapa ficam em `output/logs/`; os do build, em `<reference>/<genome_id>/logs/`.

@@ -1,4 +1,9 @@
+# a referencia vive fora do workdir (config.reference.dir); /reference/ so
+# existe ainda porque pipeline.sh e pipeline_single_ended.sh escrevem la
 /reference/*
 /samples/*
 /sratoolkit_cache/*
 /output/
+.snakemake/
+config.local.yaml
+/metadata/exp_design.csv
