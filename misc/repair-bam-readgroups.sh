@@ -182,16 +182,31 @@ echo
 
 reparar_um() {
     local b="$1"
-    local s tmp rg_novo
+    local s tmp rg_novo tam_orig tam_novo
     s=$(basename "$b" _Aligned.sortedByCoord.out.bam)
-    tmp="${b}.rgfix.tmp"
+    # O temporario PRECISA terminar em .bam: o samtools escolhe o formato de
+    # saida pela EXTENSAO. Com um sufixo que ele nao reconhece (.tmp, .part)
+    # a saida vem SEM COMPRESSAO — BAMs ~13x maiores, que passam em todas as
+    # verificacoes de conteudo e so aparecem quando o disco acaba.
+    tmp="${b%.bam}.rgfix.tmp.bam"
+    tam_orig=$(stat -c %s "$b")
 
     rm -f "$tmp"
     # -w sobrescreve a linha @RG existente (que esta quebrada)
+    # -O bam e redundante com a extensao, mas explicito e barato
     if ! samtools addreplacerg \
             -r "ID:${s}" -r "SM:${s}" -r "LB:TRUSEQ" -r "PL:ILLUMINA" \
-            -w -o "$tmp" -@ 2 "$b" 2>/dev/null; then
+            -w -O bam -o "$tmp" -@ 2 "$b" 2>/dev/null; then
         echo "FALHA  $s  (addreplacerg)"
+        rm -f "$tmp"
+        return 1
+    fi
+
+    # Guarda de compressao: reescrever um header nao muda o tamanho de forma
+    # significativa. Um salto grande significa saida descomprimida.
+    tam_novo=$(stat -c %s "$tmp")
+    if [ "$tam_novo" -gt $(( tam_orig * 2 )) ]; then
+        echo "FALHA  $s  (saida $(( tam_novo / 1024/1024 ))MB vs origem $(( tam_orig / 1024/1024 ))MB: descomprimida)"
         rm -f "$tmp"
         return 1
     fi
@@ -245,7 +260,7 @@ done
 echo "  com @RG valido : $(( total - ainda ))/$total"
 echo "  com .bai       : $indexados/$total"
 
-orfaos=$(find "$DIR" -maxdepth 1 -name "*.rgfix.tmp" | wc -l)
+orfaos=$(find "$DIR" -maxdepth 1 -name "*.rgfix.tmp.bam" | wc -l)
 [ "$orfaos" -eq 0 ] || echo "  AVISO: $orfaos arquivo(s) .rgfix.tmp orfaos — remova apos conferir"
 
 sync
