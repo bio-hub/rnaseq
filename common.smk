@@ -51,6 +51,40 @@ def _resolve_sjdb_overhang(star):
 
 OVH, OVH_ORIGEM = _resolve_sjdb_overhang(config["star"])
 
+
+def _resolve_output_dirs(cfg):
+    """work_dir (intermediarios, no scratch) e final_dir (entregaveis).
+
+    Os intermediarios de RNA-seq dominam o volume: FASTQ limpos somam o mesmo
+    que a entrada, e os BAMs mais ainda. O entregavel final (contagens,
+    relatorios) e 1-2% disso. Por isso os dois vivem em volumes diferentes.
+    """
+    out = cfg.get("output", {}) or {}
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or "nobody"
+    project = out.get("project", "rnaseq")
+
+    work = out.get("work_dir", "output").format(user=user, project=project)
+    final = out.get("final_dir", "results").format(user=user, project=project)
+
+    keep = str(out.get("keep_bams", "coord")).lower()
+    if keep not in ("none", "coord", "all"):
+        raise WorkflowError(
+            f"output.keep_bams={keep!r} invalido: use none, coord ou all."
+        )
+    return os.path.abspath(work), os.path.abspath(final), keep
+
+
+WORK, FINAL, KEEP_BAMS = _resolve_output_dirs(config)
+
+# Subdiretorios do work_dir. Tudo que e intermediario mora aqui.
+W = {
+    "clean":  f"{WORK}/clean",
+    "mapped": f"{WORK}/mapped",
+    "counts": f"{WORK}/counts",
+    "logs":   f"{WORK}/logs",
+    "rdata":  f"{WORK}/rdata",
+}
+
 # O sjdbOverhang entra no nome do indice e da sentinela para que indices com
 # overhang diferente coexistam em vez de se sobrescrever.
 REFP = {

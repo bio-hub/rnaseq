@@ -35,6 +35,42 @@ star:
   #
   limitBAMsortRAM_gb: 30
 
+  # Carrega o genoma uma vez em memoria compartilhada, em vez de uma copia por
+  # processo STAR (~32 GB cada). Economiza RAM e o tempo de load (~3 min/job).
+  #
+  # Default false porque adiciona modos de falha reais:
+  #   - se um job morre, o segmento de shm VAZA e ocupa ~32 GB ate alguem rodar
+  #     `ipcrm`; precisa de limpeza no epilog do SLURM
+  #   - so um genoma por no de cada vez
+  #   - com SLURM multi-no, cada no precisa do proprio load
+  # Vale para execucao local; para fila SLURM, mantenha false.
+  shared_genome: false
+
+# Onde o workflow escreve. Intermediarios (FASTQ limpos, BAMs) sao volumosos e
+# descartaveis: vao para o scratch. So os entregaveis vao para o final_dir.
+output:
+  project: "rnaseq"
+  # Intermediarios. {user} e {project} sao substituidos.
+  work_dir: "/mnt/scratch-shared/{user}/{project}"
+  # Entregaveis. Relativo ao diretorio de trabalho, ou caminho absoluto.
+  final_dir: "results"
+
+  # Quais BAMs exportar para o final_dir:
+  #   none  - nenhum; so contagens e relatorios
+  #   coord - apenas *_Aligned.sortedByCoord.out.bam (permite variant calling)
+  #   all   - inclui o toTranscriptome, que so serve ao RSEM
+  keep_bams: "coord"
+
+  # Apaga o work_dir ao fim, SO depois de conferir que os entregaveis chegaram
+  # ao final_dir. Ver scripts/cleanup_scratch.sh.
+  cleanup_scratch: true
+
+# O STAR grava o read group no alinhamento, mas BAMs de versoes antigas do
+# workflow saem com @RG malformado (um unico campo ID:, sem SM: nem PL:).
+# MarkDuplicates e BQSR do pipeline de variant calling exigem SM e PL.
+# Esta etapa reescreve o header com samtools addreplacerg: barato, nao realinha.
+fix_read_group: true
+
 # Threads e memoria por rule. Sem auto-deteccao: o valor nao pode depender
 # da maquina que faz o parse do Snakefile (ela nao e a que executa o job).
 threads:
@@ -42,18 +78,21 @@ threads:
   trim: 8
   map: 16
   quantify: 12
+  fix_rg: 4
   deg: 4
 mem_mb:
   build_index: 64000
   trim: 8000
   map: 70000      # genoma STAR ~30 GB + sort 30 GB + folga
   quantify: 16000
+  fix_rg: 8000
   deg: 32000
 runtime_min:      # usado apenas pelo executor slurm
   build_index: 480
   map: 240
   trim: 120
   quantify: 120
+  fix_rg: 120
   deg: 120
 
 deg_analysis:
