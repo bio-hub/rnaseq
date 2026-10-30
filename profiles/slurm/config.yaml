@@ -1,0 +1,29 @@
+# Perfil SLURM - OPCIONAL. Nao e necessario para rodar o workflow.
+# O modo padrao e local (profiles/local). Use este so se quiser submeter:
+#
+#     snakemake --workflow-profile profiles/slurm
+#
+# ATENCAO: hoje apenas o r660xs monta /mnt/reference (nao ha NFS exportando
+# o volume para os demais nos). Por isso tudo vai para a particao bigmem,
+# que e justamente o r660xs. Quando houver NFS, trim_reads e
+# quantify_transcripts podem voltar para a particao cpu.
+#
+# Particoes em 2026-10-28 (sinfo -s):
+#   gpu     r760         64 CPUs   510 GB   limite 7d
+#   cpu*    r550-[1-2]   48 CPUs   380 GB   limite 3d
+#   bigmem  r660xs      128 CPUs  1003 GB   limite 5d
+
+executor: slurm
+jobs: 16
+latency-wait: 60
+
+default-resources:
+  slurm_partition: "bigmem"
+  runtime: 120
+  mem_mb: 8000
+
+set-resources:
+  build_rsem_index:
+    slurm_partition: "bigmem"
+  map_reads:
+    slurm_partition: "bigmem"

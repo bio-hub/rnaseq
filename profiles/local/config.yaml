@@ -1,0 +1,14 @@
+# Execucao local (sem SLURM) - este e o modo padrao.
+#
+#     snakemake --workflow-profile profiles/local
+#
+# Dimensionado para o r660xs (128 threads, ~1003 GB de RAM).
+# O mem_mb e o que impede o Snakemake de disparar jobs demais em paralelo:
+# sem ele, 8 map_reads simultaneos x 70 GB sao agendados sem controle.
+# Em maquina menor, reduza cores e resources.mem_mb na mesma proporcao.
+
+cores: 120
+resources:
+  mem_mb: 900000
+printshellcmds: true
+rerun-incomplete: true

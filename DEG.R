@@ -61,7 +61,9 @@ dds_degs = data.frame(dds_results@listData,
                       row.names = dds_results@rownames)
 
 #get entrez id
-gene_info = read_delim("./reference/GRCh38_p14_gene_info.tsv")
+#args[4] = caminho do gene_info; default preserva o comportamento do pipeline.sh
+gene_info_path = if (length(args) >= 4) args[4] else "./reference/GRCh38_p14_gene_info.tsv"
+gene_info = read_delim(gene_info_path)
 
 dds_degs  = dds_degs %>%
   rownames_to_column("gene_symbol") %>%

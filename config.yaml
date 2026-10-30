@@ -1,23 +1,103 @@
 # Configuration for RNA-seq pipeline
 
-# Reference genome information
 reference:
+  # Raiz das referencias compartilhadas. Para rodar em outra maquina/caminho,
+  # sobrescreva com --configfile config.local.yaml ou --config reference='{dir: ...}'
+  dir: "/mnt/reference/rnaseq"
+  genome_id: "GRCh38_p14"   # subdiretorio de dir; um por build de genoma
+  tax_id: 9606              # filtro de especie no ETL do gene_info
+  # true apenas para dry-run em maquina sem a referencia montada
+  skip_check: false
   genome_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz"
   annotation_url: "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.gtf.gz"
   gene_info_url: "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene_info.gz"
-  
-# STAR alignment parameters
-star:
-  sjdbOverhang: 99
 
-# Resource allocation
-resources:
-  # If not specified, the workflow will determine these automatically
-  # threads_max: 16  # Maximum number of threads to use
-  # mem_gb_max: 32   # Maximum memory in GB to use
-  
-# DEG analysis parameters
+star:
+  # Comprimento das reads deste projeto, em bp. O workflow deriva
+  # sjdbOverhang = read_length - 1, que e o valor que o STAR espera.
+  #
+  # O mesmo valor vale para o build do indice e para o mapeamento: os dois
+  # precisam bater, senao o STAR aborta. Como o overhang entra no nome do
+  # diretorio e da sentinela, indices de comprimentos diferentes coexistem:
+  #
+  #   read_length: 150  ->  rsem_star_sjdb149/  +  .done_sjdb149
+  #   read_length: 100  ->  rsem_star_sjdb99/   +  .done_sjdb99
+  #
+  # Para um projeto de 100 bp, nao edite este arquivo: crie um
+  # config.local.yaml com `star: {read_length: 100}` e rode
+  # `bash scripts/build_reference.sh` uma vez para gerar o segundo indice.
+  read_length: 150
+  #
+  # Override explicito, opcional. Se presente, tem precedencia sobre
+  # read_length. Use para reads de comprimento misto (o maior - 1) ou para
+  # reaproveitar um indice construido com outro valor.
+  # sjdbOverhang: 149
+  #
+  limitBAMsortRAM_gb: 30
+
+  # Carrega o genoma uma vez em memoria compartilhada, em vez de uma copia por
+  # processo STAR (~32 GB cada). Economiza RAM e o tempo de load (~3 min/job).
+  #
+  # Default false porque adiciona modos de falha reais:
+  #   - se um job morre, o segmento de shm VAZA e ocupa ~32 GB ate alguem rodar
+  #     `ipcrm`; precisa de limpeza no epilog do SLURM
+  #   - so um genoma por no de cada vez
+  #   - com SLURM multi-no, cada no precisa do proprio load
+  # Vale para execucao local; para fila SLURM, mantenha false.
+  shared_genome: false
+
+# Onde o workflow escreve. Intermediarios (FASTQ limpos, BAMs) sao volumosos e
+# descartaveis: vao para o scratch. So os entregaveis vao para o final_dir.
+output:
+  project: "rnaseq"
+  # Intermediarios. {user} e {project} sao substituidos.
+  work_dir: "/mnt/scratch-shared/{user}/{project}"
+  # Entregaveis. Relativo ao diretorio de trabalho, ou caminho absoluto.
+  final_dir: "results"
+
+  # Quais BAMs exportar para o final_dir:
+  #   none  - nenhum; so contagens e relatorios
+  #   coord - apenas *_Aligned.sortedByCoord.out.bam (permite variant calling)
+  #   all   - inclui o toTranscriptome, que so serve ao RSEM
+  keep_bams: "coord"
+
+  # Apaga o work_dir ao fim, SO depois de conferir que os entregaveis chegaram
+  # ao final_dir. Ver scripts/cleanup_scratch.sh.
+  cleanup_scratch: true
+
+# O STAR grava o read group no alinhamento, mas BAMs de versoes antigas do
+# workflow saem com @RG malformado (um unico campo ID:, sem SM: nem PL:).
+# MarkDuplicates e BQSR do pipeline de variant calling exigem SM e PL.
+# Esta etapa reescreve o header com samtools addreplacerg: barato, nao realinha.
+fix_read_group: true
+
+# Threads e memoria por rule. Sem auto-deteccao: o valor nao pode depender
+# da maquina que faz o parse do Snakefile (ela nao e a que executa o job).
+threads:
+  build_index: 20
+  trim: 8
+  map: 16
+  quantify: 12
+  fix_rg: 4
+  deg: 4
+mem_mb:
+  build_index: 64000
+  trim: 8000
+  map: 70000      # genoma STAR ~30 GB + sort 30 GB + folga
+  quantify: 16000
+  fix_rg: 8000
+  deg: 32000
+runtime_min:      # usado apenas pelo executor slurm
+  build_index: 480
+  map: 240
+  trim: 120
+  quantify: 120
+  fix_rg: 120
+  deg: 120
+
 deg_analysis:
-  experiment_design_path: "./reference/samples/GSE185919_exp_design.csv"
+  enabled: true
+  # Dado do PROJETO (nao e referencia compartilhada), relativo ao workdir
+  experiment_design_path: "metadata/exp_design.csv"
   alpha: 0.05
   lfc_threshold: 1
