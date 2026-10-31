@@ -90,9 +90,10 @@ if LOCAL:
     # Snakefile -- ver profiles/slurm/config.yaml.
     sys.stderr.write(
         f"[rnaseq] local_scratch ativo: {LOCAL}\n"
-        "[rnaseq] ATENCAO: so use com --workflow-profile profiles/slurm, que agrupa\n"
-        "[rnaseq]          as regras por amostra. Sem agrupamento, etapas da mesma\n"
-        "[rnaseq]          amostra podem cair em nos diferentes e nao achar a entrada.\n"
+        "[rnaseq] Afeta APENAS temporarios de ferramenta (STAR _STARtmp, RSEM .temp),\n"
+        "[rnaseq] que nascem e morrem dentro de um job. Saidas declaradas de regra\n"
+        "[rnaseq] continuam no work_dir compartilhado, porque o Snakemake as confere\n"
+        "[rnaseq] a partir do no orquestrador. Ver comentario em common.smk.\n"
     )
 
 # Subdiretorios do work_dir. Tudo que e intermediario mora aqui.
@@ -114,6 +115,28 @@ if LOCAL:
 # direto no volume compartilhado, mantendo so a saida crua do STAR local.
 # Isso tiraria ~1,5 TB de trafego do array em vez dos ~744 GB de agora, e
 # e a proxima refinada -- mas mexe na estrutura do Snakefile, nao so aqui.
+#
+# O QUE PODE SER LOCAL, E O QUE NAO PODE
+#
+# Descoberto em 2026-10-31 rodando 2 amostras de verdade: o Snakemake valida
+# as SAIDAS DECLARADAS a partir do no ORQUESTRADOR. Um arquivo no /scratch de
+# um compute node nao existe para o head, e o resultado foi:
+#
+#   MissingOutputException: Job 5 completed successfully,
+#   but some output files are missing.
+#   Removing output files of failed job map_reads since they might be corrupted
+#
+# O group job tinha terminado bem -- SLURM reportou COMPLETED 0:0 nos quatro
+# passos -- e o Snakemake apagou 48 GB de trabalho valido por nao enxerga-lo.
+# Agrupar NAO resolve: o job roda num no so, mas quem confere e o head.
+#
+# Portanto:
+#   saida declarada de regra  -> SEMPRE compartilhada
+#   temporario de ferramenta  -> pode ser local (o Snakemake nem sabe que existe)
+#
+# E por isso que `clean` voltou para o WORK e so `tmp` segue o LOCAL. Nao e
+# perda: medido, o temporario do RSEM e ~30 GB por amostra contra ~4 GB do
+# FASTQ aparado. O ganho maior estava no que nao se declara.
 PESADO = LOCAL or WORK
 
 W = {
@@ -124,7 +147,7 @@ W = {
     # as ferramentas criam o temporario AO LADO DA SAIDA quando nao se diz
     # outra coisa.
     "tmp":    f"{PESADO}/tmp",
-    "clean":  f"{PESADO}/clean",
+    "clean":  f"{WORK}/clean",
     "mapped": f"{WORK}/mapped",
     "counts": f"{WORK}/counts",
     "logs":   f"{WORK}/logs",
