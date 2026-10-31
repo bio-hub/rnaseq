@@ -370,3 +370,109 @@ samtools quickcheck      OK
 
 > O BAM exportado **não vem indexado**. É deliberado: o `interomics_snakemake`
 > cria os próprios `.bai` nas etapas dele. Para abrir no IGV, indexe à mão.
+
+---
+
+## 9. Lote 3 — configuração medida
+
+Medido em 2026-10-31 com uma amostra do L3 (`SRR11853682`, 76M reads) sozinha
+no `r550-1`:
+
+| Etapa | Threads | Tempo | Observação |
+|---|---|---|---|
+| `trim_reads` (fastp) | 8 | 3m19s | |
+| `map_reads` (STAR) | 16 | 14m48s | 30+ min quando duas amostras competiam |
+| `quantify_transcripts` (RSEM) | 12 | **1h06m** | o gargalo — 79% do tempo total |
+| `fix_read_group` | 4 | 3s | hardlink; o STAR já grava `@RG` válido |
+| **total** | | **1h24m** | |
+
+Resultado: 72,27% de mapeamento único, `genes.results` com 50.117 linhas,
+`@RG` com campos separados por tab.
+
+### 9.1 Preparar o diretório
+
+O workdir precisa estar em **`/mnt/shared`**, não em `~`: os homes são locais a
+cada nó e divergentes (ver plano §17.5). Um job num compute node não enxerga
+nada de `~` do head.
+
+```bash
+mkdir -p /mnt/shared/projetos/hs_rnaseq_L3 && cd /mnt/shared/projetos/hs_rnaseq_L3
+git clone -b main https://github.com/bio-hub/rnaseq.git .
+mkdir -p samples
+ln -s /mnt/shared/projetos/hs_rnaseq/samples/*.fastq.gz samples/
+```
+
+> Se os FASTQ dos três lotes estiverem no mesmo diretório, faça o symlink só
+> dos do L3 — senão o workflow processa 167 amostras em vez de 73.
+
+### 9.2 Config do lote
+
+**Nunca edite o `config.yaml` versionado.**
+
+```yaml
+# config.local.yaml
+star:
+  read_length: 100          # L3 → sjdbOverhang 99
+output:
+  project: "hs_rnaseq_L3"
+  local_scratch: "/scratch/{user}/{project}"
+  keep_bams: "coord"
+deg_analysis:
+  enabled: false            # só quando os três lotes fecharem
+```
+
+`local_scratch` move ~32 GB por amostra de temporário do RSEM e do STAR para o
+disco local — ~2,3 TB que deixam de atravessar o array de 4 fusos. **Afeta
+apenas temporários de ferramenta**, nunca saída declarada de regra: ver o
+comentário em `common.smk` sobre a `MissingOutputException`.
+
+### 9.3 Submeter
+
+```bash
+tmux new-session -d -s l3
+tmux send-keys -t l3 'source /mnt/shared/conda/etc/profile.d/conda.sh && \
+  conda activate biohub_rnaseq && cd /mnt/shared/projetos/hs_rnaseq_L3 && \
+  snakemake --configfile config.yaml config.local.yaml \
+  --workflow-profile profiles/slurm 2>&1 | tee log_L3_$(date +%Y%m%d_%H%M%S).log' C-m
+
+sleep 20 && tmux capture-pane -p -t l3 | tail -15
+```
+
+> `tmux new-session` **falha se a sessão já existir**, e o `send-keys` seguinte
+> vai para a sessão velha. O sintoma é "nada aconteceu".
+
+### 9.4 Quanto deve demorar
+
+O profile usa `bigmem` (r660xs, 128 CPUs), onde tudo é acessado localmente por
+iSCSI — sem NFS no caminho. O `map_reads` pede 16 CPUs e 70 GB, então cabem 8
+simultâneos; as demais etapas se sobrepõem entre amostras.
+
+Estimativa grosseira: **15 a 25 horas** para as 73 amostras. Não é linear —
+há contenção de I/O, e o número real depende de quantas amostras estão em RSEM
+ao mesmo tempo.
+
+Para acrescentar os R550 quando o `bigmem` saturar, troque no profile:
+
+```yaml
+default-resources:
+  slurm_partition: "bigmem,cpu"
+```
+
+O SLURM tenta na ordem. Antes de o `bigmem` encher, espalhar só acrescenta
+tráfego de NFS.
+
+### 9.5 O que conferir ao fim
+
+```bash
+ls results/counts/*.genes.results | wc -l          # deve ser 73
+find results -type f -size 0 ! -name '.export_done'  # deve ser vazio
+grep -h "Uniquely mapped reads %" results/logs/*_Log.final.out
+samtools view -H results/mapped/<amostra>*.bam | grep '^@RG'
+```
+
+> `.export_done` tem zero bytes **por design** — é sentinela criada por
+> `touch()`. Excluí-la da busca evita falso alarme.
+
+`MaxRSS` virá vazio no `sacct`: `jobacct_gather/cgroup` com cgroup v2 não
+popula RSS neste cluster. Os limites de memória **funcionam** (job que estoura
+é OOM-killed); o que falta é só a contabilidade. Ver plano §17.6.

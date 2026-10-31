@@ -1,51 +1,79 @@
-# Perfil SLURM - OPCIONAL. Nao e necessario para rodar o workflow.
-# O modo padrao e local (profiles/local). Use este so se quiser submeter:
+# Perfil SLURM — OPCIONAL. O workflow roda sem ele, em qualquer maquina.
 #
 #     snakemake --workflow-profile profiles/slurm
 #
-# NFS: desde 2026-10-31 os quatro nos montam /mnt/reference (ro) e
-# /mnt/shared (rw) pelo fabric. A restricao anterior -- "so o r660xs monta,
-# por isso tudo vai para bigmem" -- NAO vale mais.
+#==============================================================================
+# POR QUE NAO HA `groups:` AQUI
+#==============================================================================
+# Houve, por um tempo. O agrupamento por amostra existia para que `clean`
+# ficasse no disco local de um no -- se as etapas caissem em nos diferentes, a
+# seguinte nao acharia a entrada da anterior.
 #
-# O que ainda NAO foi validado com um lote real: mover as regras para a
-# particao `cpu`. Antes de fazer isso com o L3, rode 2 amostras e confira
-# tempo, memoria de pico (sacct MaxRSS) e integridade das contagens.
+# Isso foi revertido em 2026-10-31: o Snakemake valida as SAIDAS DECLARADAS a
+# partir do no ORQUESTRADOR, e arquivo em disco local de compute node nao
+# existe para o head. Um teste real terminou com
 #
-# Particoes em 2026-10-28 (sinfo -s):
-#   gpu     r760         64 CPUs   510 GB   limite 7d
-#   cpu*    r550-[1-2]   48 CPUs   380 GB   limite 3d
+#   MissingOutputException: Job 5 completed successfully,
+#   but some output files are missing.
+#
+# e o Snakemake apagou 48 GB de trabalho valido. Hoje so os TEMPORARIOS de
+# ferramenta vao para o disco local (ver output.local_scratch no config.yaml),
+# e esses nao criam dependencia entre etapas.
+#
+# Sem a necessidade, agrupar so atrapalha: o group job reserva o PICO de CPU de
+# todas as suas regras pela duracao inteira. Medido no r660xs (128 CPUs):
+#
+#   com agrupamento  16 CPUs reservados por amostra  ->  8 simultaneas
+#   sem agrupamento  trim 8 / map 16 / quantify 12   ->  o SLURM empacota,
+#                                                        e o Snakemake sobrepoe
+#                                                        etapas de amostras
+#                                                        diferentes
+#
+#==============================================================================
+# PARTICAO
+#==============================================================================
+# bigmem (r660xs) por padrao, por dois motivos:
+#
+#   1. E o unico no que acessa /mnt/reference, /mnt/shared e /mnt/scratch-shared
+#      LOCALMENTE, por iSCSI. Rodar la elimina o NFS do caminho -- sem protocolo,
+#      sem salto de rede, sem o teto de ~1,3 GB/s do enlace unico do head.
+#   2. 128 CPUs e 1 TB de RAM: cabe mais amostra simultanea que nos R550.
+#
+# Para usar tambem os R550, troque por "bigmem,cpu" -- o SLURM tenta na ordem.
+# Vale quando o bigmem estiver saturado; antes disso, espalhar so acrescenta
+# trafego de NFS.
+#
+# Particoes (sinfo -s):
 #   bigmem  r660xs      128 CPUs  1003 GB   limite 5d
+#   cpu*    r550-[1-2]   48 CPUs   380 GB   limite 3d
+#   gpu     r760         64 CPUs   510 GB   limite 7d
 
 executor: slurm
-jobs: 16
-latency-wait: 60
+jobs: 20                  # teto de jobs submetidos; o SLURM gateia por recurso
+latency-wait: 60          # NFS pode demorar a mostrar arquivo recem-escrito
+rerun-incomplete: true
+
+# Uma tentativa extra absorve falha transitoria (NFS, contencao de I/O) sem
+# mascarar erro de verdade: o que falha duas vezes falha por motivo real.
+restart-times: 1
 
 default-resources:
   slurm_partition: "bigmem"
-  runtime: 120
+  runtime: 300
   mem_mb: 8000
+  # /tmp e tmpfs em RAM nestes nos (501 GB no head, 186 GB nos R550).
+  # Ferramenta que caia no TMPDIR padrao consome memoria em vez de disco.
+  tmpdir: "/scratch"
 
 set-resources:
   build_rsem_index:
     slurm_partition: "bigmem"
+    runtime: 480
+  trim_reads:
+    runtime: 60
   map_reads:
-    slurm_partition: "bigmem"
-
-# AGRUPAMENTO POR AMOSTRA
-#
-# Junta as etapas de uma amostra num unico job SLURM, para que todas rodem no
-# MESMO no. E o que permite `output.local_scratch` no config: o FASTQ aparado
-# fica no disco de um no, e so faz sentido se quem o le estiver la tambem.
-#
-# Fica AQUI, e nao como `group:` no Snakefile, de proposito: o Snakefile
-# precisa continuar funcionando em maquina sem SLURM, e `group:` no codigo
-# afeta tambem a execucao local, onde agrupar costuma REDUZIR paralelismo.
-# O `--groups` do profile sobrescreve qualquer definicao do workflow.
-#
-# As regras de agregacao (run_multiqc, run_deg_analysis, export_results) NAO
-# entram: elas leem de todas as amostras e precisam rodar depois de todas.
-groups:
-  trim_reads: amostra
-  map_reads: amostra
-  fix_read_group: amostra
-  quantify_transcripts: amostra
+    runtime: 120
+  quantify_transcripts:
+    runtime: 180          # medido: 66 min numa amostra de 76M reads
+  fix_read_group:
+    runtime: 60
