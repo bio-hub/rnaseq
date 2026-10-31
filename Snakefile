@@ -96,6 +96,7 @@ rule map_reads:
         runtime = config["runtime_min"]["map"],
     params:
         out_prefix = f"{W['mapped']}/{{sample}}_",
+        tmp_dir = W["tmp"],
         genome_dir = REFP["index_dir"],
         logs_dir = W["logs"],
         sort_ram = int(config["star"]["limitBAMsortRAM_gb"]) * 10**9,
@@ -113,6 +114,12 @@ rule map_reads:
         """
         ulimit -n 16384
 
+        # O STAR cria _STARtmp AO LADO do outFileNamePrefix quando nao se passa
+        # --outTmpDir, ou seja no volume compartilhado. Ele exige que o
+        # diretorio NAO exista, dai o rm -rf antes.
+        mkdir -p {params.tmp_dir}
+        rm -rf {params.tmp_dir}/{wildcards.sample}_STARtmp
+
         STAR --genomeDir {params.genome_dir} \
             --genomeLoad {params.genome_load} \
             --readFilesIn {input.r1} {input.r2} \
@@ -122,6 +129,7 @@ rule map_reads:
             --outFilterIntronMotifs RemoveNoncanonical \
             --outSAMtype BAM SortedByCoordinate \
             --outFileNamePrefix {params.out_prefix} \
+            --outTmpDir {params.tmp_dir}/{wildcards.sample}_STARtmp \
             --runThreadN {threads} \
             --quantMode TranscriptomeSAM GeneCounts \
             --limitBAMsortRAM {params.sort_ram} \
@@ -136,7 +144,7 @@ rule map_reads:
         mv {params.out_prefix}Log.out {params.logs_dir}/{wildcards.sample}_Log.out
         mv {params.out_prefix}Log.progress.out {params.logs_dir}/{wildcards.sample}_Log.progress.out
 
-        rm -rf {params.out_prefix}_STARgenome {params.out_prefix}_STARtmp
+        rm -rf {params.out_prefix}_STARgenome {params.tmp_dir}/{wildcards.sample}_STARtmp
         """
 
 
@@ -201,10 +209,17 @@ rule quantify_transcripts:
     params:
         index_prefix = REFP["index_prefix"],
         counts_dir = W["counts"],
+        tmp_dir = W["tmp"],
     shell:
         """
+        # Sem --temporary-folder o RSEM cria <amostra>.temp AO LADO da saida,
+        # isto e, em counts/ -- compartilhado. Medido: 32 GB e 29 GB para duas
+        # amostras de ~76M reads, contra entregaveis de menos de 1 MB.
+        mkdir -p {params.tmp_dir}
+
         rsem-calculate-expression \
             --seed 1954 \
+            --temporary-folder {params.tmp_dir}/{wildcards.sample}.rsemtmp \
             -p {threads} \
             --paired-end \
             --alignments \

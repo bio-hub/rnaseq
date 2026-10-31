@@ -117,6 +117,13 @@ if LOCAL:
 PESADO = LOCAL or WORK
 
 W = {
+    # Temporarios de ferramenta (STAR _STARtmp, RSEM .temp). Nao sao saida de
+    # regra nenhuma: nascem e morrem dentro de um job, logo acompanham o
+    # PESADO. Medido no teste de 2 amostras: ~30 GB por amostra so do RSEM,
+    # mais o que o STAR usa para ordenar -- tudo isso ia para o array porque
+    # as ferramentas criam o temporario AO LADO DA SAIDA quando nao se diz
+    # outra coisa.
+    "tmp":    f"{PESADO}/tmp",
     "clean":  f"{PESADO}/clean",
     "mapped": f"{WORK}/mapped",
     "counts": f"{WORK}/counts",
