@@ -3,10 +3,13 @@
 #
 #     snakemake --workflow-profile profiles/slurm
 #
-# ATENCAO: hoje apenas o r660xs monta /mnt/reference (nao ha NFS exportando
-# o volume para os demais nos). Por isso tudo vai para a particao bigmem,
-# que e justamente o r660xs. Quando houver NFS, trim_reads e
-# quantify_transcripts podem voltar para a particao cpu.
+# NFS: desde 2026-10-31 os quatro nos montam /mnt/reference (ro) e
+# /mnt/shared (rw) pelo fabric. A restricao anterior -- "so o r660xs monta,
+# por isso tudo vai para bigmem" -- NAO vale mais.
+#
+# O que ainda NAO foi validado com um lote real: mover as regras para a
+# particao `cpu`. Antes de fazer isso com o L3, rode 2 amostras e confira
+# tempo, memoria de pico (sacct MaxRSS) e integridade das contagens.
 #
 # Particoes em 2026-10-28 (sinfo -s):
 #   gpu     r760         64 CPUs   510 GB   limite 7d
@@ -27,3 +30,22 @@ set-resources:
     slurm_partition: "bigmem"
   map_reads:
     slurm_partition: "bigmem"
+
+# AGRUPAMENTO POR AMOSTRA
+#
+# Junta as etapas de uma amostra num unico job SLURM, para que todas rodem no
+# MESMO no. E o que permite `output.local_scratch` no config: o FASTQ aparado
+# fica no disco de um no, e so faz sentido se quem o le estiver la tambem.
+#
+# Fica AQUI, e nao como `group:` no Snakefile, de proposito: o Snakefile
+# precisa continuar funcionando em maquina sem SLURM, e `group:` no codigo
+# afeta tambem a execucao local, onde agrupar costuma REDUZIR paralelismo.
+# O `--groups` do profile sobrescreve qualquer definicao do workflow.
+#
+# As regras de agregacao (run_multiqc, run_deg_analysis, export_results) NAO
+# entram: elas leem de todas as amostras e precisam rodar depois de todas.
+groups:
+  trim_reads: amostra
+  map_reads: amostra
+  fix_read_group: amostra
+  quantify_transcripts: amostra

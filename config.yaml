@@ -55,6 +55,23 @@ output:
   # Entregaveis. Relativo ao diretorio de trabalho, ou caminho absoluto.
   final_dir: "results"
 
+  # Disco local do no (Tier 0), para os intermediarios PESADOS que so a
+  # propria amostra consome -- hoje apenas `clean` (FASTQ aparado).
+  #
+  # VAZIO = tudo fica no work_dir. Esse e o padrao e funciona em qualquer
+  # maquina, inclusive sem SLURM. Nao preencha aqui: use config.local.yaml.
+  #
+  # SO FUNCIONA COM AGRUPAMENTO POR AMOSTRA. O FASTQ aparado fica no disco de
+  # UM no; se trim_reads e map_reads cairem em nos diferentes, o segundo nao
+  # acha a entrada do primeiro. O agrupamento vem do profile:
+  #     snakemake --workflow-profile profiles/slurm
+  # que define `groups:` -- nao ha diretiva `group:` no Snakefile, de proposito,
+  # para a execucao local nao ser afetada.
+  #
+  # Exemplo em config.local.yaml, num cluster com Tier 0:
+  #     local_scratch: "/scratch/{user}/{project}"
+  local_scratch: ""
+
   # Quais BAMs exportar para o final_dir:
   #   none  - nenhum; so contagens e relatorios
   #   coord - apenas *_Aligned.sortedByCoord.out.bam (permite variant calling)
@@ -63,6 +80,11 @@ output:
 
   # Apaga o work_dir ao fim, SO depois de conferir que os entregaveis chegaram
   # ao final_dir. Ver scripts/cleanup_scratch.sh.
+  #
+  # ATENCAO: a limpeza roda no no do ORQUESTRADOR e so alcanca o work_dir. Com
+  # local_scratch preenchido, o que ficou no disco de cada no NAO e removido
+  # por aqui -- quem limpa e o epilog do SLURM, por no. Em execucao local, com
+  # local_scratch vazio, nao ha assimetria.
   cleanup_scratch: true
 
 # O STAR grava o read group no alinhamento, mas BAMs de versoes antigas do

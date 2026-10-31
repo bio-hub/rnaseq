@@ -71,14 +71,53 @@ def _resolve_output_dirs(cfg):
         raise WorkflowError(
             f"output.keep_bams={keep!r} invalido: use none, coord ou all."
         )
-    return os.path.abspath(work), os.path.abspath(final), keep
+
+    # Disco local do no (Tier 0). Vazio = tudo no work_dir, que e o
+    # comportamento padrao e funciona em qualquer maquina, com ou sem SLURM.
+    local = (out.get("local_scratch") or "").strip()
+    if local:
+        local = os.path.abspath(local.format(user=user, project=project))
+
+    return os.path.abspath(work), os.path.abspath(final), keep, local
 
 
-WORK, FINAL, KEEP_BAMS = _resolve_output_dirs(config)
+WORK, FINAL, KEEP_BAMS, LOCAL = _resolve_output_dirs(config)
+
+if LOCAL:
+    # EXIGE AGRUPAMENTO POR AMOSTRA. O FASTQ aparado fica no disco de UM no;
+    # se trim_reads e map_reads cairem em nos diferentes, o segundo nao acha a
+    # entrada do primeiro. O agrupamento vem do profile (--groups), nao do
+    # Snakefile -- ver profiles/slurm/config.yaml.
+    sys.stderr.write(
+        f"[rnaseq] local_scratch ativo: {LOCAL}\n"
+        "[rnaseq] ATENCAO: so use com --workflow-profile profiles/slurm, que agrupa\n"
+        "[rnaseq]          as regras por amostra. Sem agrupamento, etapas da mesma\n"
+        "[rnaseq]          amostra podem cair em nos diferentes e nao achar a entrada.\n"
+    )
 
 # Subdiretorios do work_dir. Tudo que e intermediario mora aqui.
+#
+# O RECORTE: o que pode ser local e o que NAO pode.
+#
+# Local exige que so a PROPRIA amostra consuma o arquivo. Compartilhado e
+# obrigatorio para tudo que alguma regra le de TODAS as amostras:
+#
+#   run_multiqc       le logs/*.json de todas
+#   run_deg_analysis  le counts/* de todas
+#   export_results    le counts, logs e mapped/*_rg.bam de todas
+#
+#   clean   372 GB no lote 1  consumido so por map_reads da mesma amostra  -> LOCAL
+#   mapped  520 GB no lote 1  export_results le *_rg.bam de todas          -> compartilhado
+#   counts  logs  rdata       lidos por todas as regras de agregacao       -> compartilhado
+#
+# Mover `mapped` tambem exigiria que fix_read_group gravasse o *_rg.bam
+# direto no volume compartilhado, mantendo so a saida crua do STAR local.
+# Isso tiraria ~1,5 TB de trafego do array em vez dos ~744 GB de agora, e
+# e a proxima refinada -- mas mexe na estrutura do Snakefile, nao so aqui.
+PESADO = LOCAL or WORK
+
 W = {
-    "clean":  f"{WORK}/clean",
+    "clean":  f"{PESADO}/clean",
     "mapped": f"{WORK}/mapped",
     "counts": f"{WORK}/counts",
     "logs":   f"{WORK}/logs",
