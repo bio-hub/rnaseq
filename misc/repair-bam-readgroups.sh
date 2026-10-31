@@ -239,8 +239,15 @@ printf '%s\n' "${a_reparar[@]}" \
   | xargs -P "$PAR" -I{} bash -c 'reparar_um "$@"' _ {} \
   | tee /tmp/.rgfix_saida_$$ || true
 
-ok=$(grep -c '^OK' /tmp/.rgfix_saida_$$ 2>/dev/null || echo 0)
-falhas=$(grep -c '^FALHA' /tmp/.rgfix_saida_$$ 2>/dev/null || echo 0)
+# NAO use `grep -c ... || echo 0`: sem nenhuma ocorrencia o `grep -c` IMPRIME
+# "0" E retorna 1, entao o fallback dispara tambem e a substituicao captura as
+# duas saidas -- a variavel fica com "0\n0". O sintoma foi um "0" solto na tela
+# e `[: 0 0: esperava numero inteiro` no teste final, que e o codigo de saida:
+# o script conferiu 86/86 corretos e devolveu falha.
+contar() { grep -c "$1" "$2" 2>/dev/null || true; }
+ok=$(contar '^OK' "/tmp/.rgfix_saida_$$")
+falhas=$(contar '^FALHA' "/tmp/.rgfix_saida_$$")
+ok=${ok:-0}; falhas=${falhas:-0}
 rm -f /tmp/.rgfix_saida_$$
 
 #------------------------------------------------------------------------------
