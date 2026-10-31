@@ -268,3 +268,105 @@ E o resumo de recursos, para calibrar a próxima rodada:
 sacct -u $USER --starttime today --format=JobName%22,MaxRSS,Elapsed,State \
   | sort -u
 ```
+
+---
+
+## 9. O que foi aprendido rodando de verdade (2026-10-31)
+
+Três coisas que só apareceram ao executar um lote real, e nenhuma delas aparece
+em dry-run.
+
+### 9.1 🔴 Saída declarada de regra NÃO pode ficar em disco local
+
+O Snakemake valida as saídas **a partir do nó orquestrador**. Um arquivo no
+`/scratch` de um compute node não existe para o head:
+
+```
+MissingOutputException: Job 5 completed successfully,
+but some output files are missing. Missing files after 60 seconds.
+Removing output files of failed job map_reads since they might be corrupted
+```
+
+O group job tinha terminado bem — SLURM reportou `COMPLETED 0:0` nos quatro
+passos — e o Snakemake **apagou 48 GB de trabalho válido** por não enxergá-lo.
+
+**Agrupar não resolve.** O job roda num nó só, mas quem confere continua sendo o
+head. Custou 1h45 de computação descobrir.
+
+| | |
+|---|---|
+| Saída declarada de regra | **sempre** no `work_dir` compartilhado |
+| Temporário de ferramenta | pode ser local — o Snakemake nem sabe que existe |
+
+### 9.2 Temporário de ferramenta é o maior consumidor de I/O compartilhado
+
+Medido com 2 amostras, antes da correção:
+
+```
+32G  counts/SRR11853682.temp     <- temporário do RSEM
+29G  counts/SRR11853683.temp
+824K counts/SRR11853682_ReadsPerGene.out.tab   <- o entregável
+```
+
+**~30 GB por amostra**, contra ~4 GB do FASTQ aparado. STAR e RSEM criam o
+temporário **ao lado da saída** quando não se passa `--outTmpDir` /
+`--temporary-folder`. O STAR ainda limpa ao terminar, então não deixava rastro —
+só a I/O, invisível.
+
+Depois da correção, mesma amostra:
+
+```
+compartilhado:  clean 7,9G   mapped 28G   counts 35M   logs 4,1M
+local:          tmp 32G  (removido pelas ferramentas ao fim)
+```
+
+Nas 73 amostras do L3 são ~2,3 TB que deixam de disputar os 4 fusos do ME5012.
+
+> **Regra geral: medir onde o byte cai, não onde o workflow diz que ele cai.**
+> `du` durante a execução revelou o que nenhuma leitura do DAG revelaria.
+
+### 9.3 `slurm-client` tem de existir nos compute nodes
+
+Com agrupamento, o `snakemake` roda **dentro** do nó e invoca cada regra via
+`srun`. Sem o pacote, o group job morre em segundos:
+
+```
+/bin/sh: 1: srun: not found
+```
+
+Nunca apareceu antes porque, sem agrupamento, `srun` só precisa existir no head.
+Os R550 vieram só com `slurmd`. A versão do cliente tem de bater com a do
+`slurmctld`.
+
+### 9.4 Tempos medidos — base para calibrar o L3
+
+Amostra de ~76M reads (L3, 100 bp), partição `cpu` no R550 (48 CPUs, 380 GB):
+
+| Etapa | Sozinha no nó | 2 amostras competindo |
+|---|---|---|
+| `trim_reads` (fastp) | 3m19s | 3m05s |
+| `map_reads` (STAR) | **14m48s** | 32m49s |
+| `quantify_transcripts` (RSEM) | 1h06 | 1h00–1h07 |
+| `fix_read_group` | 3s | 3s |
+| **total do group job** | **1h24** | 1h33–1h43 |
+
+O STAR mais que dobra de velocidade sem concorrência; o RSEM quase não muda.
+Isso sugere limitar jobs simultâneos por nó em vez de maximizar o paralelismo.
+
+`fix_read_group` em 3 segundos é o esperado, não um erro: a regra verifica se o
+`@RG` já tem `SM:` e, em caso afirmativo, faz `ln -f` em vez de reescrever.
+
+### 9.5 Verificado no entregável
+
+```
+Uniquely mapped reads %  72.27%
+genes.results            50.117 linhas, 8 MB
+@RG                      ID: SM: LB:TRUSEQ PL:ILLUMINA  (campos separados)
+samtools quickcheck      OK
+```
+
+> `.export_done` tem **zero bytes de propósito** — é sentinela criada por
+> `touch()`. Uma verificação que procure "arquivos de zero bytes" vai acusá-la.
+
+> O BAM exportado **não vem indexado**. É deliberado: o `interomics_snakemake`
+> cria os próprios `.bai` nas etapas dele. Para abrir no IGV, indexe à mão.
