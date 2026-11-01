@@ -45,6 +45,27 @@ copiar "$WORK/counts" "$FINAL/counts" "contagens STAR"  "*_ReadsPerGene.out.tab"
 copiar "$WORK/counts" "$FINAL/counts" "contagens RSEM"  "*.genes.results"
 copiar "$WORK/counts" "$FINAL/counts" "isoformas RSEM"  "*.isoforms.results"
 
+# _SJ.out.tab: juncoes de splicing detectadas pelo STAR.
+# Nao serve ao DEG. Serve ao STAR 2-pass e a qualquer reanalise que queira
+# juncoes novas. Sao ~12 MB por amostra (854 MB em 73) -- barato demais para
+# justificar perder junto com o scratch. Exportado por PRECAUCAO: a decisao
+# sobre 2-pass fica reversivel.
+copiar "$WORK/counts" "$FINAL/counts" "juncoes STAR"    "*_SJ.out.tab"
+
+# {amostra}.stat/ e DIRETORIO, entao `copiar` (que so pega -type f) nao serve.
+# Guarda o modelo do RSEM: .cnt, .model, .theta. Util para auditar a
+# quantificacao depois, ~5 MB por amostra.
+n_stat=0
+for d in "$WORK"/counts/*.stat; do
+    [ -d "$d" ] || continue
+    if cp -ru "$d" "$FINAL/counts/" 2>/dev/null; then
+        n_stat=$((n_stat+1))
+    else
+        echo "  FALHA ao copiar $d"; falhou=1
+    fi
+done
+echo "  modelo RSEM (.stat): $n_stat diretorio(s)"
+
 echo
 echo "[2/4] relatorios e logs"
 copiar "$WORK/logs" "$FINAL/logs" "multiqc"        "multiqc_report.html"
@@ -115,15 +136,40 @@ n_orig=$(find "$WORK/counts" -name "*.genes.results" -type f 2>/dev/null | wc -l
 echo "  contagens RSEM: $n_counts no destino, $n_orig na origem"
 [ "$n_counts" -eq "$n_orig" ] || { echo "  DIVERGE"; falhou=1; }
 
+n_sj=$(find "$FINAL/counts" -name "*_SJ.out.tab" -type f 2>/dev/null | wc -l)
+n_sj_orig=$(find "$WORK/counts" -name "*_SJ.out.tab" -type f 2>/dev/null | wc -l)
+echo "  juncoes STAR:   $n_sj no destino, $n_sj_orig na origem"
+[ "$n_sj" -eq "$n_sj_orig" ] || { echo "  DIVERGE"; falhou=1; }
+
 if [ "$KEEP" != "none" ]; then
     n_bam=$(find "$FINAL/mapped" -name "*_Aligned.sortedByCoord.out.bam" -type f 2>/dev/null | wc -l)
     echo "  BAMs no destino: $n_bam"
-    # amostra: BAM truncado passa em 'existe' e falha no quickcheck
-    ruins=0
-    while read -r b; do
-        samtools quickcheck "$b" 2>/dev/null || { echo "    CORROMPIDO: $b"; ruins=$((ruins+1)); }
-    done < <(find "$FINAL/mapped" -name "*.bam" -type f | shuf -n 5)
-    [ "$ruins" -eq 0 ] && echo "  quickcheck amostral: ok" || falhou=1
+
+    # O quickcheck so vale se o samtools existir. Sem esta guarda, um samtools
+    # fora do PATH sai com 127 e o `||` abaixo o chamava de BAM corrompido --
+    # 5 falsos positivos observados em 2026-11-01, rodando o script fora do
+    # ambiente conda. O inverso e pior: zero BAMs amostrados dava "ok".
+    if ! command -v samtools >/dev/null 2>&1; then
+        echo "  AVISO: samtools fora do PATH -- quickcheck NAO executado."
+        echo "         Rode dentro do ambiente conda (biohub_rnaseq) para validar os BAMs."
+        falhou=1
+    elif [ "$n_bam" -eq 0 ]; then
+        echo "  AVISO: nenhum BAM no destino para verificar"
+        falhou=1
+    else
+        # amostra: BAM truncado passa em 'existe' e falha no quickcheck
+        ruins=0
+        n_check=0
+        while read -r b; do
+            n_check=$((n_check+1))
+            samtools quickcheck "$b" || { echo "    CORROMPIDO: $b"; ruins=$((ruins+1)); }
+        done < <(find "$FINAL/mapped" -name "*.bam" -type f | shuf -n 5)
+        if [ "$ruins" -eq 0 ] && [ "$n_check" -gt 0 ]; then
+            echo "  quickcheck amostral: ok ($n_check de $n_bam)"
+        else
+            falhou=1
+        fi
+    fi
 fi
 
 sync
