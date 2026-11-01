@@ -52,6 +52,26 @@ def _resolve_sjdb_overhang(star):
 OVH, OVH_ORIGEM = _resolve_sjdb_overhang(config["star"])
 
 
+def _validate_star_combo(star):
+    """2-pass e genoma compartilhado nao coexistem.
+
+    O STAR aborta com "2-pass method is not compatible with --genomeLoad ...
+    SOLUTION: re-run STAR with --genomeLoad NoSharedMemory". Falhar aqui, no
+    parse, custa um segundo; falhar la custa o lote pela metade.
+    """
+    if star.get("twopass", False) and star.get("shared_genome", False):
+        raise WorkflowError(
+            "config star: twopass e shared_genome nao podem estar ambos ligados.\n"
+            "O STAR aborta com '2-pass method is not compatible with --genomeLoad'.\n"
+            "Desligue um dos dois. Medido no L3, shared_genome economiza ~24 s por\n"
+            "amostra (~3,5% do mapeamento); o 2-pass muda o alinhamento. Se o\n"
+            "objetivo e variant calling, mantenha twopass e desligue shared_genome."
+        )
+
+
+_validate_star_combo(config["star"])
+
+
 def _resolve_output_dirs(cfg):
     """work_dir (intermediarios, no scratch) e final_dir (entregaveis).
 

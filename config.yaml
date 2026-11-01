@@ -35,8 +35,29 @@ star:
   #
   limitBAMsortRAM_gb: 30
 
+  # STAR 2-pass. A passada 1 descobre juncoes novas, que sao reinseridas no
+  # indice em memoria antes da passada 2. As GATK Best Practices para variant
+  # calling em RNA-seq pedem 2-pass: melhora o alinhamento ao redor de juncoes
+  # nao anotadas.
+  #
+  # Default false porque o custo e alto e o alcance, medido nos lotes L1 e L3,
+  # e pequeno: so 0,8% a 1,7% das reads unicas apoiam juncoes nao anotadas.
+  # Dobra o tempo de map_reads (~11 min -> ~20-23 min na amostra mediana).
+  #
+  # INCOMPATIVEL com shared_genome: o STAR aborta com "2-pass method is not
+  # compatible with --genomeLoad". A guarda em common.smk falha no parse se os
+  # dois estiverem ligados, em vez de deixar o lote morrer no meio.
+  #
+  # Para DEG puro, deixe false: mudar isso remapeia tudo e altera as contagens.
+  twopass: false
+
   # Carrega o genoma uma vez em memoria compartilhada, em vez de uma copia por
-  # processo STAR (~32 GB cada). Economiza RAM e o tempo de load (~3 min/job).
+  # processo STAR (~32 GB cada). Economiza RAM e o tempo de load.
+  #
+  # Medido nos 73 Log.final.out do L3: a carga do genoma tem mediana de 24 s
+  # (p90 36 s) contra 653 s de mediana do mapeamento -- ~3,5%. O ganho e menor
+  # do que este comentario afirmava antes ("~3 min/job"). Entre as duas
+  # otimizacoes, twopass vale mais, e elas sao mutuamente exclusivas.
   #
   # Default false porque adiciona modos de falha reais:
   #   - se um job morre, o segmento de shm VAZA e ocupa ~32 GB ate alguem rodar

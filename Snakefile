@@ -39,6 +39,7 @@ SAMPLES = sorted(
 )
 
 SHARED_GENOME = bool(config["star"].get("shared_genome", False))
+TWOPASS = bool(config["star"].get("twopass", False))
 
 
 # O alvo final e o export: tudo que importa precisa ter chegado ao final_dir.
@@ -101,12 +102,19 @@ rule map_reads:
         logs_dir = W["logs"],
         sort_ram = int(config["star"]["limitBAMsortRAM_gb"]) * 10**9,
         genome_load = "LoadAndKeep" if SHARED_GENOME else "NoSharedMemory",
+        twopass = "--twopassMode Basic" if TWOPASS else "",
     shell:
         # --sjdbGTFfile e --sjdbOverhang NAO aparecem aqui de proposito: o indice
         # ja foi construido com as juncoes (--star-sjdboverhang no build), entao
         # passa-las de novo apenas reinsere as mesmas juncoes a cada amostra. E
         # a insercao em tempo de mapeamento e incompatıvel com genoma em memoria
-        # compartilhada, que precisa ser read-only.
+        # compartilhada, que precisa ser read-only. Vale tambem para o 2-pass:
+        # a guarda de common.smk recusa twopass junto com shared_genome.
+        #
+        # --outSAMmapqUnique 60: sem isso o STAR da MAPQ 255 aos unicos, e o
+        # GATK le 255 como "indisponivel" e descarta. Nao afeta multimappers,
+        # que seguem 0/1/3 conforme NH. NM e MD entram para ferramentas que as
+        # exigem; o SplitNCigarReads do GATK as remove de qualquer forma.
         #
         # --outSAMattrRGline usa campos separados por ESPACO: o STAR os une com
         # tabs. Escrever "\\t" aqui produzia o literal 't' (o bash converte \t
@@ -125,7 +133,9 @@ rule map_reads:
             --readFilesIn {input.r1} {input.r2} \
             --readFilesCommand zcat \
             --sjdbScore 2 \
-            --outSAMattributes NH HI AS nM XS \
+            --outSAMattributes NH HI AS nM NM MD XS \
+            --outSAMmapqUnique 60 \
+            {params.twopass} \
             --outFilterIntronMotifs RemoveNoncanonical \
             --outSAMtype BAM SortedByCoordinate \
             --outFileNamePrefix {params.out_prefix} \
@@ -144,7 +154,8 @@ rule map_reads:
         mv {params.out_prefix}Log.out {params.logs_dir}/{wildcards.sample}_Log.out
         mv {params.out_prefix}Log.progress.out {params.logs_dir}/{wildcards.sample}_Log.progress.out
 
-        rm -rf {params.out_prefix}_STARgenome {params.tmp_dir}/{wildcards.sample}_STARtmp
+        rm -rf {params.out_prefix}_STARgenome {params.out_prefix}_STARpass1 \
+            {params.tmp_dir}/{wildcards.sample}_STARtmp
         """
 
 
