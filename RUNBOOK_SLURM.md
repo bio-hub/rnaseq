@@ -7,27 +7,49 @@ proibições, a verificação por conteúdo e as armadilhas de dado valem igual 
 
 ## 1. Leia isto antes de decidir usar SLURM
 
-**Hoje o SLURM neste cluster é uma fila, não um cluster.**
+> **Atualizado em 2026-11-01.** Até 31/10 esta seção dizia que não havia NFS e
+> que o SLURM era "uma fila, não um cluster". **Deixou de ser verdade.** Se você
+> encontrar essa afirmação em outro documento, é texto velho.
 
-Não há NFS. Apenas o `r660xs` monta `/mnt/reference`, `/mnt/home`,
-`/mnt/shared` e `/mnt/scratch-shared`. Um job que caia no `r550-1` ou no
-`r760` não enxerga a referência, nem os FASTQ, nem o conda compartilhado — e
-falha de formas confusas, porque o caminho existe no `fstab` do head node e
-não no do worker.
+O cluster tem os quatro nós em produção, com **288 núcleos**:
 
-Por isso o `profiles/slurm/config.yaml` fixa **`slurm_partition: bigmem`**,
-que é exatamente o `r660xs`. Ou seja: os jobs rodam na mesma máquina em que
-você já rodaria localmente.
+| Partição | Nós | Núcleos | RAM | Tier 0 (`/scratch`) |
+|---|---|---:|---:|---|
+| `bigmem` | `r660xs` (head) | 128 | 1003 GB | **HDD** — ver §1.1 |
+| `gpu` | `r760` | 64 | 510 GB | NVMe |
+| `cpu` | `r550-1`, `r550-2` | 48 cada | 380 GB | SSD |
 
-**O que você ganha mesmo assim:**
+`/mnt/shared`, `/mnt/reference`, `/mnt/scratch-shared` e `/mnt/home` são
+exportados por NFSv4 pelo head e montados em todos os workers. Um job em
+qualquer nó enxerga a referência, os FASTQ e o conda compartilhado.
+
+O `profiles/slurm/config.yaml` usa `slurm_partition: "bigmem,cpu,gpu"` — o
+SLURM aloca em qualquer uma.
+
+**Validado em produção:** o lote L3 rodou 73 amostras, 9.363 M reads, 295/295
+passos, em 10h56 distribuídas pelos quatro nós.
+
+### 1.1 O que esperar de desempenho, e o que não esperar
+
+Com quatro nós em vez de um, o ganho fim a fim medido foi de **1,16×** — não
+de 2,25×, que é a razão de núcleos. Até o fim do alinhamento o ganho era de
+1,96×; o resto se perdeu numa cauda de 4h29 em que o cluster terminava o RSEM
+de um punhado de amostras com três máquinas ociosas.
+
+A causa é o `/scratch` do head ser HDD, e ela produziu **8 jobs mortos por
+TIMEOUT** numa única corrida, todos nesse nó. Mitigado em 01/11 montando
+`/scratch/ronald` em tmpfs no head. Diagnóstico completo e a ordem dos ajustes
+pendentes estão em `superpc_lika/DESEMPENHO.md` — **leia antes de propor
+qualquer ajuste de desempenho**, porque dois dos ajustes óbvios pioram as
+coisas se aplicados na ordem errada.
+
+**O que você ganha com o SLURM, além do paralelismo:**
 
 - A fila não depende de uma sessão `tmux` viva
 - Contabilidade por job (`sacct`): tempo, memória de pico, exit code
 - Limite de concorrência por recurso, não por "quantos couberam"
 - O `prolog`/`epilog` cria e remove scratch isolado por job
-- O mesmo comando funcionará sem alteração quando houver NFS
-
-**O que você NÃO ganha:** paralelismo além dos 128 threads do head node.
+- `restart-times` recupera job morto por TIMEOUT — salvou 5 amostras no L3
 
 > Para usar `cpu` e `gpu`, é preciso exportar os volumes por NFS e replicar
 > usuários e grupos com os **mesmos UID/GID** nos 4 nós. Ver plano de rede,
@@ -64,13 +86,25 @@ O L2 são 8 amostras do GSE115099, reads de **125 bp**, índice `sjdb124`
 
 ### 3.1 Preparar o diretório de trabalho
 
-Como `ronald`, use um workdir seu — não o do `cliente01`:
+O diretório do projeto vai em **`/mnt/shared/projetos/`**, nunca em `~`:
 
 ```bash
-mkdir -p ~/projetos/hs_rnaseq_L2 && cd ~/projetos/hs_rnaseq_L2
+mkdir -p /mnt/shared/projetos/hs_rnaseq_L2 && cd /mnt/shared/projetos/hs_rnaseq_L2
 git clone -b main https://github.com/bio-hub/rnaseq.git .
 mkdir -p samples metadata
 ```
+
+> **Por que não `~/projetos/`.** O home do administrador é **local em cada nó**
+> — `/home/ronald` no head não é o `/home/ronald` do `r550-1`. Um projeto ali
+> fica invisível aos workers, fora do backup e preso a um disco só.
+>
+> Isto não é hipotético: a versão anterior deste runbook mandava
+> `mkdir -p ~/projetos/hs_rnaseq_L2`, e foi exatamente assim que os 135 GB de
+> entregáveis do L2 foram parar no disco local do head, onde ficaram até
+> 01/11. Tiveram de ser copiados de volta, e a raiz do head estava em 87%.
+>
+> `/mnt/home/<tenant>` serve para usuários tenant; projetos e entregáveis vão
+> para `/mnt/shared/projetos/`, que é legível por todo o grupo `bioinfo`.
 
 ### 3.2 Baixar os FASTQ
 
@@ -127,7 +161,7 @@ o trabalho pesado está na fila, não no processo.
 ```bash
 tmux new-session -d -s l2
 tmux send-keys -t l2 'source /mnt/shared/conda/etc/profile.d/conda.sh && \
-  conda activate biohub_rnaseq && cd ~/projetos/hs_rnaseq_L2 && \
+  conda activate biohub_rnaseq && cd /mnt/shared/projetos/hs_rnaseq_L2 && \
   snakemake --configfile config.yaml config.local.yaml \
   --workflow-profile profiles/slurm \
   2>&1 | tee logs_L2_$(date +%Y%m%d_%H%M%S).log' C-m
@@ -145,7 +179,7 @@ Alternativa sem `tmux`, para deixar o orquestrador ele mesmo na fila:
 sbatch --partition=bigmem --cpus-per-task=2 --mem=4G --time=3-00:00:00 \
        --job-name=snakemake_L2 --output=orquestrador_%j.out \
        --wrap="source /mnt/shared/conda/etc/profile.d/conda.sh && \
-               conda activate biohub_rnaseq && cd ~/projetos/hs_rnaseq_L2 && \
+               conda activate biohub_rnaseq && cd /mnt/shared/projetos/hs_rnaseq_L2 && \
                snakemake --configfile config.yaml config.local.yaml \
                --workflow-profile profiles/slurm"
 ```

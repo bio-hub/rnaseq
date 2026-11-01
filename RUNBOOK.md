@@ -13,11 +13,18 @@ Leia tudo antes de executar qualquer comando.
   cd "$(dirname "$(readlink -f RUNBOOK.md)")" 2>/dev/null || cd ~/rnaseq
   pwd
   ```
-  Cada usuário tem a própria cópia (ex.: `/mnt/home/cliente01/rnaseq`).
-  **Não assuma caminhos de outro usuário** — os homes são `700` e você não os lê.
-- **Branch:** `refactor/reference-path` — **a `main` NÃO tem este workflow.**
-  O Snakefile da `main` tem erro de sintaxe e nem parseia. Confira a branch antes
-  de qualquer coisa.
+  Projetos e entregáveis ficam em **`/mnt/shared/projetos/<projeto>/`**, não em
+  `~`: o home do administrador é local em cada nó e some de vista dos workers.
+  Tenants têm home em `/mnt/home/<user>`, que é `700` — **não assuma caminhos de
+  outro usuário**, você não os lê.
+- **Branch:** `main`.
+
+  > Até 31/10 este runbook dizia que a `main` não tinha o workflow e que o
+  > Snakefile dela nem parseava. **Isso deixou de valer**: o refactor foi
+  > mergeado na `main` (PR #1, 12 commits) e o Snakefile de lá carrega —
+  > conferido com `snakemake --list` em 01/11. As branches
+  > `refactor/reference-path` e `feat/scratch-workdir-and-rg-fix` continuam no
+  > repositório, mas são históricas. Use a `main`.
 - **Ambiente conda:** `biohub_rnaseq`, na instalação **compartilhada**
   `/mnt/shared/conda` (ver §5.1).
 - **Referência:** `/mnt/reference/rnaseq/GRCh38_p14/` — **já construída**, 40 GB,
