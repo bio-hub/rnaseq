@@ -9,6 +9,15 @@
 # e fundidos. O .interval_list e gerado com BedToIntervalList contra o dict do INTEROMICS
 # (namespace de destino do pipeline).
 #
+# O chrM (NC_012920.1) NAO entra no alvo -- decisao de 2026-11-01, questao 7.6 do
+# VARIANT_CALLING.md. O HaplotypeCaller e diploide, a profundidade de mtDNA em RNA-seq e
+# enorme e heteroplasmia exige tratamento proprio: chamada diploide ali produz genotipo sem
+# sentido biologico. A exclusao e aplicada DEPOIS do cruzamento com a analise de juncoes,
+# que foi medida com o chrM dentro -- o cruzamento continua valendo como checagem do parse
+# do GTF, e a contribuicao do chrM e reportada a parte no exons_resumo.txt.
+# O chrM continua no cabecalho @SQ do .interval_list, porque o cabecalho e o dict inteiro do
+# interomics; o que sai sao os INTERVALOS.
+#
 # Saidas em /mnt/shared/projetos/tese_natalia/referencia_ncbi/intervalos/ :
 #   exons_pad50.bed.gz (+ .tbi)   alvo do variant calling (BED 0-based, bgzip+tabix)
 #   exons_pad50.interval_list     o mesmo, formato Picard/GATK (usar em refgenome.interval)
@@ -16,8 +25,11 @@
 #   exons_resumo.txt              tamanhos, intervalos por contig, checagens, genes Tier 1
 #
 # Verificacoes (o job falha se alguma reprovar; nao se confia so no codigo de saida, CLAUDE.md 4.2.1):
-#   - exons sem slop, no namespace NCBI, == 146.738.699 pb em 302.874 intervalos (analise de juncoes)
+#   - exons sem slop, no namespace NCBI, == 146.738.699 pb em 302.874 intervalos (analise de juncoes;
+#     numero medido COM o chrM, por isso o cruzamento roda antes da exclusao)
 #   - BED relido do disco: ordenado, sem sobreposicao, dentro dos contigs, contigs no dict
+#   - nenhum intervalo em chrM no BED, no BED sem slop e no .interval_list (BLOQUEANTE).
+#     E tambem o que quebra a idempotencia: os arquivos da versao COM chrM reprovam aqui e sao refeitos
 #   - .interval_list: 195 @SQ, n de intervalos e bases iguais ao BED
 #   - os 10 genes Tier 1: 100% das bases de exon dentro do alvo (BLOQUEANTE se nao)
 # Idempotente: se tudo existe, e mais novo que as entradas e revalida, nao refaz.
@@ -61,6 +73,7 @@ trap 'rm -rf "$STAGE"' EXIT
 cat > "$STAGE/validar.py" <<'PY'
 import sys, os, gzip, subprocess
 d, bed_path, il_path, nopad_path = sys.argv[1:5]       # d = dict do interomics
+EXCLUIDOS = {"chrM"}        # 7.6: mtDNA fora do alvo (nomes do interomics)
 dic = []
 for l in open(d):
     if l.startswith("@SQ"):
@@ -71,6 +84,7 @@ def check_bed(p, gz):
     n = bp = 0; prev = None
     for l in (gzip.open(p, "rt") if gz else open(p)):
         c, s, e = l.split("\t")[:3]; s = int(s); e = int(e); n += 1; bp += e - s
+        if c in EXCLUIDOS: probs.append(f"{p}: contig excluido presente: {c}"); break
         if c not in ln: probs.append(f"{p}: contig fora do dict: {c}"); break
         if not (0 <= s < e <= ln[c]): probs.append(f"{p}: intervalo invalido {c}:{s}-{e}"); break
         if prev:
@@ -88,6 +102,8 @@ for l in open(il_path):
     elif l.startswith("@"): continue
     else:
         f = l.split("\t"); ni += 1; ib += int(f[2]) - int(f[1]) + 1
+        if f[0] in EXCLUIDOS and f"interval_list: contig excluido presente: {f[0]}" not in probs:
+            probs.append(f"interval_list: contig excluido presente: {f[0]}")
 if nsq != len(dic): probs.append(f"interval_list: {nsq} @SQ, esperado {len(dic)}")
 if ni != nb: probs.append(f"interval_list: {ni} intervalos, BED tem {nb}")
 if ib != bb: probs.append(f"interval_list: {ib} bases, BED tem {bb}")
@@ -111,7 +127,8 @@ import sys, re, collections, bisect
 gtf, mapf, maskf, dictf, stage = sys.argv[1:6]
 FLANK = 50
 TIER1 = ["NCSTN","PSENEN","PSEN1","PSEN2","APH1A","APH1B","PSTPIP1","NOD2","MEFV","SREBF1"]
-REF_BP, REF_N = 146738699, 302874          # da analise de juncoes (exons NC_ fundidos, namespace NCBI)
+REF_BP, REF_N = 146738699, 302874          # da analise de juncoes (exons NC_ fundidos, namespace NCBI, COM chrM)
+EXCLUDE_NCBI = {"NC_012920.1"}             # chrM -- questao 7.6, decidida em 2026-11-01 (ver cabecalho)
 
 cmap = dict(l.rstrip("\n").split("\t") for l in open(mapf))
 dic = []
@@ -156,6 +173,29 @@ print(f"exons NC_ no GTF: {nex}; fundidos sem slop (namespace NCBI): {n_iv} inte
 
 miss = [c for c in exons if c not in cmap]
 if miss: print("ERRO: contigs NC_ do GTF sem entrada no mapa:", miss, file=sys.stderr); sys.exit(1)
+
+# --- 7.6: remover o chrM do alvo. Feito AQUI, depois do cruzamento acima (medido com o chrM
+# dentro) e antes de qualquer construcao de saida, para que nenhum arquivo publicado o contenha.
+drop_rows = []
+for c in sorted(EXCLUDE_NCBI):
+    if c not in exons:
+        print(f"ERRO: contig a excluir nao existe no GTF: {c}", file=sys.stderr); sys.exit(1)
+    ic = cmap[c]
+    m = merge(exons[c])
+    raw = [(max(0, s - FLANK), min(ln[ic], e + FLANK)) for s, e in exons[c]]
+    mp = merge(raw)
+    drop_rows.append((c, ic, len(m), sum(e - s for s, e in m), len(mp), sum(e - s for s, e in mp)))
+    del exons[c]
+t1_excl = sorted({g for g in TIER1 for gc, _, _ in gene_span.get(g, []) if gc in EXCLUDE_NCBI})
+if t1_excl:
+    print("ERRO: gene Tier 1 em contig excluido:", t1_excl, file=sys.stderr); sys.exit(1)
+for g in TIER1:                     # nao sobra exon de gene Tier 1 num contig excluido
+    for gc in list(gene_exons[g]):
+        if gc in EXCLUDE_NCBI:
+            print(f"ERRO: exon de {g} em contig excluido {gc}", file=sys.stderr); sys.exit(1)
+print("EXCLUIDOS DO ALVO (questao 7.6): " + "; ".join(
+    f"{c} ({ic}): -{a} intervalos/-{b} pb sem slop, -{d} intervalos/-{e} pb com slop"
+    for c, ic, a, b, d, e in drop_rows))
 
 # --- renomear, slop (limitado ao contig), ordenar na ordem do interomics, fundir
 nopad = []; pad = []; clamped = 0
@@ -224,7 +264,11 @@ for g in TIER1:
 L = []
 L.append(f"GTF: {gtf}")
 L.append(f"exons NC_ lidos: {nex}")
-L.append(f"CRUZAMENTO (sem slop, namespace NCBI): {n_iv} intervalos / {tot} pb  vs esperado {REF_N} / {REF_BP}  -> {'CONFERE' if cross_ok else 'DIVERGE'}")
+L.append(f"CRUZAMENTO (sem slop, namespace NCBI, COM chrM): {n_iv} intervalos / {tot} pb  vs esperado {REF_N} / {REF_BP}  -> {'CONFERE' if cross_ok else 'DIVERGE'}")
+L.append("")
+L.append("EXCLUIDOS DO ALVO (questao 7.6, decidida em 2026-11-01 -- mtDNA nao entra na analise):")
+L.append("contig_ncbi\tcontig_interomics\tintervalos_nopad\tpb_nopad\tintervalos_pad\tpb_pad")
+for c, ic, a, b, dd, ee in drop_rows: L.append(f"{c}\t{ic}\t{a}\t{b}\t{dd}\t{ee}")
 L.append("")
 L.append(f"ALVO FINAL (slop {FLANK} pb, fundido, namespace interomics): {len(pad)} intervalos, {pad_bp} pb  (slop limitado ao contig em {clamped} exons)")
 L.append(f"exons sem slop (interomics): {len(nopad)} intervalos, {sum(e-s for _,s,e in nopad)} pb")
