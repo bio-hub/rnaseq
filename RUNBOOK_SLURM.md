@@ -228,6 +228,106 @@ O plugin converte `threads` em `--cpus-per-task`, `resources.mem_mb` em
 > `map_reads` está em 240 min por amostra; se um lote tiver amostras muito
 > profundas, suba antes de submeter — não depois de perder 4 horas.
 
+### 5.1 Como os jobs se distribuem entre os nós: `Weight` e `LLN`
+
+**Sintoma visto no L4 (05/11):** durante o `trim_reads` o `r550-2` ficou parado, enquanto o head, o `r760` e o `r550-1`
+trabalhavam. Não era defeito do nó. Duas coisas se somaram:
+
+1. **Teto de jobs abaixo da capacidade.** Os dois lotes somavam `--jobs` 28, e cada trimagem pede 8 CPUs, ou seja, 224 CPUs
+   para 288 no cluster. Sobram 64 CPUs em algum lugar.
+2. **O Slurm empacota em vez de espalhar.** Com `SelectType=select/cons_tres` e todos os nós em `Weight=1`, o padrão é
+   *best fit*: dentro de uma partição, o Slurm enche o nó que já está ocupado antes de abrir o próximo. Na partição `cpu`,
+   o `r550-1` recebia tudo e o `r550-2`, último da fila, ficava com a sobra.
+
+Na fase de `map_reads` (16 CPUs e 70 GB por job, só nos workers) o `r550-2` passou a receber jobs normalmente.
+
+Conferir o estado atual:
+
+```bash
+scontrol show node | grep -E "NodeName=|Weight="            # peso de cada nó (padrão 1)
+scontrol show partition cpu | grep -oE "LLN=[A-Z]+"         # LLN=NO é o padrão
+grep -nE "^NodeName|^PartitionName" /etc/slurm/slurm.conf
+```
+
+#### Os três controles, e o que cada um resolve
+
+| Controle | Onde | Efeito | Resolve o sintoma acima? |
+|---|---|---|---|
+| `--jobs` maior | linha de comando do Snakemake | Mais jobs na fila ao mesmo tempo | Sim, se `jobs × threads` passar de 288. Custo: mais leitores simultâneos no `mpatha` na trimagem, que satura com 2–4 leitores (`CLAUDE.md` §5.3) |
+| `Weight` por nó | `NodeName=` no `slurm.conf` | Nós de **peso menor são usados primeiro**, quando os demais critérios empatam | **Não sozinho.** Com os dois R550 em pesos diferentes, um deles continua ficando com a sobra; só muda qual. Serve para **ordenar preferência** entre nós diferentes |
+| `LLN=YES` | `PartitionName=` no `slurm.conf` | Aloca no nó **menos carregado** da partição, em vez de empacotar | **Sim**, para os dois R550: os jobs se alternam entre `r550-1` e `r550-2` |
+
+`Weight` serve para dizer, por exemplo, "use o `r760` antes dos R550 e o head por último". Para nós iguais, como os dois R550,
+quem espalha é o `LLN`.
+
+> **Limite do `Weight`:** ele ordena nós **dentro de uma partição**. Nossos jobs pedem várias partições
+> (`"bigmem,gpu,cpu"`), e a documentação do `sbatch` diz que nesse caso o Slurm usa a partição que permite **o início mais
+> cedo**, considerando antes as de `PriorityTier` maior; a ordem escrita na lista não é garantida. Para preferir uma partição
+> inteira a outra, o controle é `PriorityTier` no `PartitionName=`, não `Weight`. Confirme o comportamento com o teste do fim
+> desta seção antes de confiar nele.
+
+#### Opção A: temporária, sem editar arquivo
+
+Vale até o próximo restart do `slurmctld`. Bom para testar.
+
+```bash
+# peso menor = usado primeiro
+sudo scontrol update NodeName=r760   Weight=1
+sudo scontrol update NodeName=r550-1 Weight=10
+sudo scontrol update NodeName=r550-2 Weight=10
+sudo scontrol update NodeName=r660xs Weight=100     # head por último: serviços de controle e /scratch em tmpfs
+
+# espalhar entre os R550
+sudo scontrol update PartitionName=cpu LLN=YES
+
+# desfazer
+sudo scontrol update NodeName=r760,r550-1,r550-2,r660xs Weight=1
+sudo scontrol update PartitionName=cpu LLN=NO
+```
+
+#### Opção B: permanente
+
+O `/etc/slurm/slurm.conf` **não é configless**: há uma cópia idêntica em cada um dos 4 nós (mesmo md5). A edição tem de ir
+para os 4, e também para `superpc_lika/scripts/setup-slurm-fabric.sh`, que gera esse arquivo. Se o script não for atualizado,
+a próxima reaplicação desfaz a mudança.
+
+Nas linhas existentes, acrescentar ao fim:
+
+```
+NodeName=r660xs ... State=UNKNOWN Weight=100
+NodeName=r760   ... State=UNKNOWN Weight=1
+NodeName=r550-1 ... State=UNKNOWN Weight=10
+NodeName=r550-2 ... State=UNKNOWN Weight=10
+
+PartitionName=cpu Nodes=r550-1,r550-2 Default=YES MaxTime=3-00:00:00 State=UP OverSubscribe=NO LLN=YES
+```
+
+Depois, no head:
+
+```bash
+sudo cp /etc/slurm/slurm.conf /etc/slurm/slurm.conf.bak_$(date +%Y%m%d)    # antes de editar, nos 4 nós
+# ... editar nos 4 nós, ou editar no head e copiar:
+for n in r760 r550-1 r550-2; do sudo scp /etc/slurm/slurm.conf $n:/etc/slurm/slurm.conf; done
+md5sum /etc/slurm/slurm.conf; for n in r760 r550-1 r550-2; do ssh $n md5sum /etc/slurm/slurm.conf; done   # 4 iguais
+sudo scontrol reconfigure
+scontrol show node | grep -E "NodeName=|Weight="
+```
+
+`scontrol reconfigure` não mata jobs em execução, mas faça entre lotes: um erro de sintaxe no arquivo derruba o `slurmctld`.
+
+#### Teste antes de confiar
+
+Um array de `sleep` mostra onde o Slurm põe cada tarefa, sem gastar nada:
+
+```bash
+sbatch --array=1-12 --partition=bigmem,gpu,cpu -c 8 --mem=1G -t 5 -J teste_dist --wrap "sleep 120"
+squeue -u $USER -n teste_dist -o "%.10i %.9P %N"       # contar tarefas por nó
+scancel -n teste_dist
+```
+
+Com `Weight` e `LLN` como acima, o esperado é o `r760` encher primeiro, as tarefas se alternarem entre `r550-1` e `r550-2`, e o
+head só receber quando os workers lotarem. Se não for isso, quem está decidindo é a regra de partições da nota acima.
+
 ---
 
 ## 6. Quando algo falha
