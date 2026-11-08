@@ -49,6 +49,21 @@ exp_design = read_csv(args[1]) %>%
   mutate(condition = fct_relevel(condition, 
                                  c("control", "case")))
 
+# Alinha as colunas das contagens a ordem do exp_design.
+# As contagens sao lidas em ordem alfabetica (era o que o ls() dava), e o
+# exp_design vem na ordem em que o usuario escreveu o CSV. O DESeq2 exige as
+# duas na MESMA ordem e aborta quando divergem -- ou seja, o DEG so rodava se o
+# CSV estivesse por acaso em ordem alfabetica. Reordenar aqui tira essa
+# exigencia implicita do usuario.
+faltando_no_design = setdiff(colnames(raw_counts), rownames(exp_design))
+faltando_nas_contagens = setdiff(rownames(exp_design), colnames(raw_counts))
+if (length(faltando_no_design) > 0 || length(faltando_nas_contagens) > 0) {
+  stop("exp_design e contagens nao descrevem as mesmas amostras.\n",
+       "  sem linha no design : ", paste(faltando_no_design, collapse = ", "), "\n",
+       "  sem contagem        : ", paste(faltando_nas_contagens, collapse = ", "))
+}
+raw_counts = raw_counts[, rownames(exp_design), drop = FALSE]
+
 #create DESeqDataSet object
 dds = DESeqDataSetFromMatrix(countData = raw_counts,
                              colData = exp_design,
