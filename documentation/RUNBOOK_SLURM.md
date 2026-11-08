@@ -2,6 +2,11 @@
 
 Complementa `RUNBOOK.md`, que cobre a execução local. Leia aquele primeiro: as
 proibições, a verificação por conteúdo e as armadilhas de dado valem igual aqui.
+Para a visão geral e a configuração, `../README.md`; para a divergência de genoma
+entre este workflow e o variant calling, `REFERENCIA_UNIFICADA.md`.
+
+> As referências a `CLAUDE.md` neste arquivo apontam para o `CLAUDE.md` da tese
+> (`tese_natalia/CLAUDE.md`), que **não** faz parte deste repositório.
 
 ---
 
@@ -23,8 +28,13 @@ O cluster tem os quatro nós em produção, com **288 núcleos**:
 exportados por NFSv4 pelo head e montados em todos os workers. Um job em
 qualquer nó enxerga a referência, os FASTQ e o conda compartilhado.
 
-O `profiles/slurm/config.yaml` usa `slurm_partition: "bigmem,cpu,gpu"` — o
-SLURM aloca em qualquer uma.
+O `profiles/slurm/config.yaml` **hoje** fixa `slurm_partition: "bigmem"` (r660xs):
+é o nó que acessa os volumes localmente por iSCSI, sem NFS no caminho (commit
+`968555a`). Para espalhar pelos outros nós use `bigmem,cpu` (ou `bigmem,cpu,gpu`):
+troque `default-resources.slurm_partition` num profile copiado, ou sobrescreva na
+linha de comando (`--default-resources`; confira a sintaxe no `snakemake --help`
+da versão instalada). O L3 foi distribuído pelos quatro nós, com a partição
+sobrescrita; o profile versionado não reproduz isso sozinho.
 
 **Validado em produção:** o lote L3 rodou 73 amostras, 9.363 M reads, 295/295
 passos, em 10h56 distribuídas pelos quatro nós.
@@ -224,9 +234,16 @@ Três camadas, da mais geral para a mais específica:
 O plugin converte `threads` em `--cpus-per-task`, `resources.mem_mb` em
 `--mem` e `resources.runtime` (minutos) em `--time`.
 
-> **`runtime` é um teto rígido.** O SLURM mata o job ao atingi-lo. O
-> `map_reads` está em 240 min por amostra; se um lote tiver amostras muito
-> profundas, suba antes de submeter — não depois de perder 4 horas.
+> **`runtime` é um teto rígido.** O SLURM mata o job ao atingi-lo. Atenção a
+> **qual valor vale**: o `config.yaml` traz `runtime_min` (`map` 240, `trim` 120,
+> `quantify` 120, `fix_rg` 120), mas o `profiles/slurm/config.yaml` tem
+> `set-resources` com `map_reads` 120, `trim_reads` 60, `quantify_transcripts` 180
+> e `fix_read_group` 60, e o `set-resources` do profile tem precedência sobre o
+> `resources:` da rule (conferir no job: `sacct -j <id> -o JobName,Timelimit`).
+> Se um lote tiver amostras muito profundas, suba o valor **no profile** (ou num
+> `--set-resources` na linha de comando) antes de submeter — não depois de perder
+> 4 horas. O `restart-times: 1` do profile repete um job morto por TIMEOUT, mas
+> com o mesmo limite.
 
 ### 5.1 Como os jobs se distribuem entre os nós: `Weight` e `LLN`
 
@@ -354,8 +371,8 @@ snakemake --configfile config.yaml config.local.yaml \
           --workflow-profile profiles/slurm --unlock
 ```
 
-Depois relance normalmente. O `rerun-incomplete` está ligado no profile local;
-para o SLURM, acrescente `--rerun-incomplete` se o profile não o trouxer.
+Depois relance normalmente. O `rerun-incomplete` está ligado nos dois profiles
+(`local` e `slurm`).
 
 **Nunca use `--touch`.** Ver `CLAUDE.md` §4.3.
 
@@ -367,9 +384,15 @@ Igual à execução local — o SLURM não muda isso:
 
 | | |
 |---|---|
-| Intermediários | `/mnt/scratch-shared/<user>/<project>/` |
-| Entregáveis | `results/` no workdir |
+| Intermediários (`work_dir`) | `/mnt/scratch-shared/<user>/<project>/` |
+| Entregáveis (`final_dir`) | `results/` no workdir: `counts/ logs/ mapped/ rdata/` e `.export_done` |
 | Scratch por job | `/mnt/scratch-shared/jobs/$SLURM_JOB_ID`, removido pelo epilog |
+| Temporários de ferramenta | `tmp/` sob `output.local_scratch` se preenchido, senão sob o `work_dir`. O profile também define `tmpdir: "/scratch"` |
+
+Com `output.cleanup_scratch: true` (padrão) o `work_dir` é **apagado** ao fim, depois
+de `export_results.sh` e `cleanup_scratch.sh` reconferirem o `final_dir`; em falha
+ele é preservado. A limpeza não alcança o `local_scratch` de cada nó: quem limpa
+aquele disco é o epilog. O export inclui também `_SJ.out.tab` e `{amostra}.stat/`.
 
 O scratch por job (criado pelo `prolog`) é para temporários da própria
 ferramenta. O `work_dir` do workflow é outra coisa e **sobrevive** ao fim do
@@ -461,7 +484,8 @@ Nas 73 amostras do L3 são ~2,3 TB que deixam de disputar os 4 fusos do ME5012.
 
 ### 9.3 `slurm-client` tem de existir nos compute nodes
 
-Com agrupamento, o `snakemake` roda **dentro** do nó e invoca cada regra via
+(O agrupamento por amostra foi **removido** do profile em 31/10, commit `968555a`;
+esta lição vale se alguém o religar.) Com agrupamento, o `snakemake` roda **dentro** do nó e invoca cada regra via
 `srun`. Sem o pacote, o group job morre em segundos:
 
 ```
@@ -474,7 +498,8 @@ Os R550 vieram só com `slurmd`. A versão do cliente tem de bater com a do
 
 ### 9.4 Tempos medidos — base para calibrar o L3
 
-Amostra de ~76M reads (L3, 100 bp), partição `cpu` no R550 (48 CPUs, 380 GB):
+Amostra de ~76M reads (L3, 100 bp), partição `cpu` no R550 (48 CPUs, 380 GB),
+medida **ainda com agrupamento** (por isso "total do group job"):
 
 | Etapa | Sozinha no nó | 2 amostras competindo |
 |---|---|---|
@@ -507,7 +532,7 @@ samtools quickcheck      OK
 
 ---
 
-## 9. Lote 3 — configuração medida
+## 10. Lote 3 — configuração medida
 
 Medido em 2026-10-31 com uma amostra do L3 (`SRR11853682`, 76M reads) sozinha
 no `r550-1`:
@@ -523,7 +548,7 @@ no `r550-1`:
 Resultado: 72,27% de mapeamento único, `genes.results` com 50.117 linhas,
 `@RG` com campos separados por tab.
 
-### 9.1 Preparar o diretório
+### 10.1 Preparar o diretório
 
 O workdir precisa estar em **`/mnt/shared`**, não em `~`: os homes são locais a
 cada nó e divergentes (ver plano §17.5). Um job num compute node não enxerga
@@ -539,7 +564,7 @@ ln -s /mnt/shared/projetos/hs_rnaseq/samples/*.fastq.gz samples/
 > Se os FASTQ dos três lotes estiverem no mesmo diretório, faça o symlink só
 > dos do L3 — senão o workflow processa 167 amostras em vez de 73.
 
-### 9.2 Config do lote
+### 10.2 Config do lote
 
 **Nunca edite o `config.yaml` versionado.**
 
@@ -558,9 +583,17 @@ deg_analysis:
 `local_scratch` move ~32 GB por amostra de temporário do RSEM e do STAR para o
 disco local — ~2,3 TB que deixam de atravessar o array de 4 fusos. **Afeta
 apenas temporários de ferramenta**, nunca saída declarada de regra: ver o
-comentário em `common.smk` sobre a `MissingOutputException`.
+comentário em `common.smk` sobre a `MissingOutputException`. Não exige
+agrupamento por amostra (o profile não tem `groups:`; o comentário em
+`common.smk` que diz o contrário é texto de antes do commit `968555a`).
 
-### 9.3 Submeter
+> **Cuidado no head:** `/scratch/ronald` no r660xs (partição `bigmem`) é **tmpfs de
+> 300 GB**, isto é, RAM. Com o profile em `bigmem`, 8 `quantify_transcripts`
+> simultâneos × ~30 GB de temporário do RSEM esgotam esses 300 GB. Use
+> `local_scratch` só quando o job cair nos workers (`cpu`/`gpu`, onde `/scratch` é
+> disco), ou deixe vazio.
+
+### 10.3 Submeter
 
 ```bash
 tmux new-session -d -s l3
@@ -575,7 +608,7 @@ sleep 20 && tmux capture-pane -p -t l3 | tail -15
 > `tmux new-session` **falha se a sessão já existir**, e o `send-keys` seguinte
 > vai para a sessão velha. O sintoma é "nada aconteceu".
 
-### 9.4 Quanto deve demorar
+### 10.4 Quanto deve demorar
 
 O profile usa `bigmem` (r660xs, 128 CPUs), onde tudo é acessado localmente por
 iSCSI — sem NFS no caminho. O `map_reads` pede 16 CPUs e 70 GB, então cabem 8
@@ -595,7 +628,7 @@ default-resources:
 O SLURM tenta na ordem. Antes de o `bigmem` encher, espalhar só acrescenta
 tráfego de NFS.
 
-### 9.5 O que conferir ao fim
+### 10.5 O que conferir ao fim
 
 ```bash
 ls results/counts/*.genes.results | wc -l          # deve ser 73
@@ -610,3 +643,28 @@ samtools view -H results/mapped/<amostra>*.bam | grep '^@RG'
 `MaxRSS` virá vazio no `sacct`: `jobacct_gather/cgroup` com cgroup v2 não
 popula RSS neste cluster. Os limites de memória **funcionam** (job que estoura
 é OOM-killed); o que falta é só a contabilidade. Ver plano §17.6.
+
+---
+
+## 11. Depois do RNA-seq: variant calling no `interomics_snakemake`
+
+Os BAMs exportados (`results/mapped/*_Aligned.sortedByCoord.out.bam`,
+`keep_bams: coord`) são a **entrada** do modo `rnaseq_mode` do
+`interomics_snakemake`. Ponteiros:
+
+- **Config de produção** que amarra os dois:
+  `/home/ronald/Documentos/ronald/tese_natalia/corridas/vc_L1_L3/config_rnaseq_L1.yaml`
+  (L4: `.../corridas/vc_L4/config_rnaseq_L4{a,b}.yaml`; lançamento e plano de disco em
+  `.../corridas/vc_L4/README.md`). O campo `rnaseq.bam_dirs` aponta para o
+  `results/mapped` do lote, **somente-leitura**.
+- **O BAM daqui é NCBI (`NC_...`)**, e o variant calling é `chr*`. A rule
+  `rna_conform_bam` (`rules/rna_conform_bam.snakefile` + `scripts/rna_conform_bam.sh`,
+  no interomics) renomeia/reordena pelo `rna_contig_map.tsv` e descarta 514 contigs.
+  Tudo isso e a proposta de unificação: `REFERENCIA_UNIFICADA.md`.
+- **No SLURM, o variant calling usa outro profile e outras partições:** o do L4 é só
+  workers (`gpu,cpu`), nunca `bigmem`, porque o temporário do `conform` e do
+  `SplitNCigarReads` vai para `/scratch/ronald`, que no head é tmpfs.
+- O BAM precisa de `@RG` com `SM`/`PL` (§8) e MAPQ 60 (lotes novos) ou 255 (L1–L3; o
+  `SplitNCigarReads` converte). Não precisa de `.bai`.
+- Se for usar `star.twopass` (recomendado para variant calling), decida **antes** de mapear.
+- Não combine, numa coorte, amostras mapeadas em referências diferentes.

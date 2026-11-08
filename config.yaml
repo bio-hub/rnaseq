@@ -76,18 +76,22 @@ output:
   # Entregaveis. Relativo ao diretorio de trabalho, ou caminho absoluto.
   final_dir: "results"
 
-  # Disco local do no (Tier 0), para os intermediarios PESADOS que so a
-  # propria amostra consome -- hoje apenas `clean` (FASTQ aparado).
+  # Disco local do no (Tier 0), para os TEMPORARIOS DE FERRAMENTA (tmp/:
+  # _STARtmp do STAR e .rsemtmp do RSEM, ~30 GB por amostra so do RSEM).
+  # Saidas declaradas de regra (clean/, mapped/, counts/, logs/, rdata/) ficam
+  # SEMPRE no work_dir compartilhado: o Snakemake as confere a partir do no
+  # orquestrador, e um arquivo no disco de um compute node nao existe para ele.
   #
   # VAZIO = tudo fica no work_dir. Esse e o padrao e funciona em qualquer
   # maquina, inclusive sem SLURM. Nao preencha aqui: use config.local.yaml.
   #
-  # SO FUNCIONA COM AGRUPAMENTO POR AMOSTRA. O FASTQ aparado fica no disco de
-  # UM no; se trim_reads e map_reads cairem em nos diferentes, o segundo nao
-  # acha a entrada do primeiro. O agrupamento vem do profile:
-  #     snakemake --workflow-profile profiles/slurm
-  # que define `groups:` -- nao ha diretiva `group:` no Snakefile, de proposito,
-  # para a execucao local nao ser afetada.
+  # NAO exige agrupamento por amostra. (Ate 2026-10-31 `clean` ficava no disco
+  # local e o agrupamento era obrigatorio; `clean` voltou para o work_dir e o
+  # profile slurm nao tem mais `groups:` -- commit 968555a.) Um temporario nasce
+  # e morre dentro de um job, entao nao cria dependencia entre etapas.
+  #
+  # CUIDADO no head (r660xs): /scratch/ronald e tmpfs de 300 GB, ou seja, RAM.
+  # Use so quando os jobs caem nos workers (cpu/gpu), onde /scratch e disco.
   #
   # Exemplo em config.local.yaml, num cluster com Tier 0:
   #     local_scratch: "/scratch/{user}/{project}"
