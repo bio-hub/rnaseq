@@ -275,6 +275,10 @@ rule run_deg_analysis:
     params:
         alpha = config["deg_analysis"]["alpha"],
         lfc_threshold = config["deg_analysis"]["lfc_threshold"],
+        # O DEG.R assumia "./output/counts" e "./output/rdata", herdados do
+        # pipeline.sh. A rule roda com work_dir absoluto, entao os caminhos
+        # precisam vir daqui -- senao o script nao acha as contagens.
+        counts_dir = W["counts"],
     log:
         f"{W['logs']}/deg_analysis.log",
     threads: config["threads"]["deg"]
@@ -287,7 +291,9 @@ rule run_deg_analysis:
             {input.design} \
             {params.alpha} \
             {params.lfc_threshold} \
-            {input.gene_info} > {log} 2>&1
+            {input.gene_info} \
+            {params.counts_dir} \
+            {output.rdata} > {log} 2>&1
         """
 
 

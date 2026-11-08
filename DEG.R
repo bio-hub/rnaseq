@@ -2,26 +2,46 @@
 library(tidyverse)
 library(DESeq2)
 
+#command args
+# Lido ANTES da leitura das contagens: os caminhos vinham fixos como
+# "./output/counts" e "./output/rdata", herdados do pipeline.sh, e o Snakemake
+# roda a rule com work_dir ABSOLUTO -- o script nao achava as contagens e nao
+# tinha onde gravar. Os dois agora chegam por argumento; o default preserva o
+# comportamento antigo para quem ainda chamar o script na mao.
+args = commandArgs(trailingOnly = TRUE)
+
+counts_dir = if (length(args) >= 5) args[5] else "./output/counts"
+rdata_path = if (length(args) >= 6) args[6] else "./output/rdata/DEG.RData"
+
 #read counts
-for (i in list.files(path = "./output/counts", 
+# sample_names e montado explicitamente em vez de varrer ls() depois. O ls()
+# recolhia TUDO que existisse no ambiente: bastava uma variavel nova (como os
+# dois caminhos acima) para ela entrar no bind_cols e quebrar a matriz de
+# contagens. Com a lista explicita, acrescentar variavel aqui deixa de ser
+# armadilha.
+sample_names = character(0)
+
+for (i in list.files(path = counts_dir,
                      pattern = "_ReadsPerGene.out.tab")){
   sample_name = str_replace(i, "_ReadsPerGene.out.tab", "")
 
   assign(paste0(sample_name),
-        data.table::fread(paste0("./output/counts/",i), skip = 4) %>%
+        data.table::fread(file.path(counts_dir, i), skip = 4) %>%
           select(V1,
                  !!paste0(sample_name) := V2) %>% #Using := with !! for dynamic column naming
           arrange(V1) %>%
           column_to_rownames("V1")
         ) 
+  sample_names = c(sample_names, sample_name)
 }
 rm(i, sample_name)
 
-raw_counts = eval(parse(
-  text = paste0("bind_cols(", paste0(ls(), collapse = ","), ")")))
+if (length(sample_names) == 0) {
+  stop("Nenhum _ReadsPerGene.out.tab encontrado em: ", counts_dir)
+}
 
-#command args
-args = commandArgs(trailingOnly = TRUE)
+# sort() reproduz a ordem alfabetica que o ls() dava antes.
+raw_counts = do.call(bind_cols, mget(sort(sample_names)))
 
 #read experiment design
 exp_design = read_csv(args[1]) %>%
@@ -81,4 +101,5 @@ reactome_total = ReactomePA::enrichPathway(gene = dds_signif$gene_id,
 dds_reactome = data.frame(reactome_total)
 
 #save DESEq2 analsyis
-save.image("./output/rdata/DEG.RData")
+dir.create(dirname(rdata_path), recursive = TRUE, showWarnings = FALSE)
+save.image(rdata_path)
